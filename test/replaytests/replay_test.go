@@ -28,6 +28,7 @@ import (
 	"context"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/golang/mock/gomock"
 	"github.com/stretchr/testify/require"
@@ -62,7 +63,7 @@ func (s *replayTestSuite) TearDownTest() {
 }
 
 func (s *replayTestSuite) TestGenerateWorkflowHistory() {
-	s.T().Skip("Remove this Skip to regenerate the history.")
+	//s.T().Skip("Remove this Skip to regenerate the history.")
 	c, _ := client.Dial(client.Options{
 		Logger: ilog.NewDefaultLogger(),
 	})
@@ -72,6 +73,7 @@ func (s *replayTestSuite) TestGenerateWorkflowHistory() {
 
 	w.RegisterWorkflow(Workflow1)
 	w.RegisterWorkflow(Workflow2)
+	w.RegisterWorkflow(CancelOrderSelectWorkflow)
 	w.RegisterActivity(helloworldActivity)
 
 	_ = w.Start()
@@ -93,8 +95,17 @@ func (s *replayTestSuite) TestGenerateWorkflowHistory() {
 	var res2 string
 	_ = we2.Get(context.Background(), &res2)
 
+	workflowOptions3 := client.StartWorkflowOptions{
+		ID:        "replay-tests-cancel-order",
+		TaskQueue: "replay-test",
+	}
+	we3, _ := c.ExecuteWorkflow(context.Background(), workflowOptions3, CancelOrderSelectWorkflow)
+	time.Sleep(time.Second * 2)
+	c.CancelWorkflow(context.Background(), "replay-tests-cancel-order", "")
+	_ = we3.Get(context.Background(), nil)
+
 	// Now run:
-	// tctl workflow show --workflow_id replay-tests-workflow1 --of workflow1.json
+	// tctl workflow show --workflow_id replay-tests-cancel-order --of replay-tests-cancel-order.json
 	// tctl workflow show --workflow_id replay-tests-workflow2 --of workflow2.json
 }
 
@@ -364,6 +375,13 @@ func (s *replayTestSuite) TestVersionAndMutableSideEffect() {
 	replayer := worker.NewWorkflowReplayer()
 	replayer.RegisterWorkflow(VersionAndMutableSideEffectWorkflow)
 	err := replayer.ReplayWorkflowHistoryFromJSONFile(ilog.NewDefaultLogger(), "replay-tests-version-and-mutable-side-effect.json")
+	s.NoError(err)
+}
+
+func (s *replayTestSuite) TestCancelOrder() {
+	replayer := worker.NewWorkflowReplayer()
+	replayer.RegisterWorkflow(CancelOrderSelectWorkflow)
+	err := replayer.ReplayWorkflowHistoryFromJSONFile(ilog.NewDefaultLogger(), "replay-tests-cancel-order.json")
 	s.NoError(err)
 }
 

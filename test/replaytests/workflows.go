@@ -437,3 +437,31 @@ func generateUUID(ctx workflow.Context) (string, error) {
 
 	return generatedUUID, nil
 }
+
+func CancelOrderSelectWorkflow(ctx workflow.Context) error {
+	timerf := workflow.NewTimer(ctx, 5*time.Minute)
+
+	var err error
+	disCtx, _ := workflow.NewDisconnectedContext(ctx)
+	selector := workflow.NewSelector(ctx)
+
+	selector.AddFuture(timerf, func(f workflow.Future) {
+		err = timerf.Get(ctx, nil)
+		var result string
+
+		ao := workflow.ActivityOptions{
+			ScheduleToStartTimeout: time.Minute,
+			StartToCloseTimeout:    time.Minute,
+			HeartbeatTimeout:       time.Second * 20,
+		}
+		disCtx = workflow.WithActivityOptions(disCtx, ao)
+		err = workflow.ExecuteActivity(disCtx, helloworldActivity, "world").Get(ctx, &result)
+	})
+	selector.AddReceive(ctx.Done(), func(c workflow.ReceiveChannel, more bool) {
+		c.Receive(ctx, nil)
+		workflow.Sleep(disCtx, 1*time.Second)
+
+	})
+	selector.Select(ctx)
+	return err
+}

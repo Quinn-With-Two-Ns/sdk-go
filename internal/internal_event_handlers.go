@@ -149,11 +149,13 @@ type (
 		currentReplayTime time.Time // Indicates current replay time of the command.
 		currentLocalTime  time.Time // Local time when currentReplayTime was updated.
 
-		completeHandler completionHandler                                                          // events completion handler
-		cancelHandler   func()                                                                     // A cancel handler to be invoked on a cancel notification
-		signalHandler   func(name string, input *commonpb.Payloads, header *commonpb.Header) error // A signal handler to be invoked on a signal event
-		queryHandler    func(queryType string, queryArgs *commonpb.Payloads, header *commonpb.Header) (*commonpb.Payloads, error)
-		updateHandler   func(name string, id string, args *commonpb.Payloads, header *commonpb.Header, callbacks UpdateCallbacks)
+		completeHandler               completionHandler
+		setIsCanceledHandler          func()
+		workflowExecutionIsCancelling bool                                                                       // A cancel handler to be invoked on a cancel notification
+		cancelHandler                 func()                                                                     // A cancel handler to be invoked on a cancel notification
+		signalHandler                 func(name string, input *commonpb.Payloads, header *commonpb.Header) error // A signal handler to be invoked on a signal event
+		queryHandler                  func(queryType string, queryArgs *commonpb.Payloads, header *commonpb.Header) (*commonpb.Payloads, error)
+		updateHandler                 func(name string, id string, args *commonpb.Payloads, header *commonpb.Header, callbacks UpdateCallbacks)
 
 		logger                log.Logger
 		isReplay              bool // flag to indicate if workflow is in replay mode
@@ -493,11 +495,10 @@ func validateAndSerializeMemo(memoMap map[string]interface{}, dc converter.DataC
 }
 
 func (wc *workflowEnvironmentImpl) RegisterCancelHandler(handler func()) {
-	wrappedHandler := func() {
-		wc.commandsHelper.workflowExecutionIsCancelling = true
-		handler()
+	wc.setIsCanceledHandler = func() {
+		wc.workflowExecutionIsCancelling = true
 	}
-	wc.cancelHandler = wrappedHandler
+	wc.cancelHandler = handler
 }
 
 func (wc *workflowEnvironmentImpl) ExecuteChildWorkflow(
@@ -1056,6 +1057,10 @@ func (weh *workflowExecutionEventHandlerImpl) ProcessEvent(
 		weh.workflowInfo.currentHistoryLength = int(event.EventId)
 		// Reset the counter on command helper used for generating ID for commands
 		weh.commandsHelper.setCurrentWorkflowTaskStartedEventID(event.GetEventId())
+		if weh.workflowExecutionIsCancelling {
+			weh.cancelHandler()
+			weh.workflowExecutionIsCancelling = false
+		}
 		weh.workflowDefinition.OnWorkflowTaskStarted(weh.deadlockDetectionTimeout)
 
 	case enumspb.EVENT_TYPE_WORKFLOW_TASK_TIMED_OUT:
@@ -1368,7 +1373,7 @@ func (weh *workflowExecutionEventHandlerImpl) handleTimerFired(event *historypb.
 }
 
 func (weh *workflowExecutionEventHandlerImpl) handleWorkflowExecutionCancelRequested() {
-	weh.cancelHandler()
+	weh.setIsCanceledHandler()
 }
 
 func (weh *workflowExecutionEventHandlerImpl) handleMarkerRecorded(
