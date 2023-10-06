@@ -159,6 +159,7 @@ type (
 		stopTimeout       time.Duration
 		fatalErrCb        func(error)
 		userContextCancel context.CancelFunc
+		tuner             workerTuner
 	}
 
 	// baseWorker that wraps worker activities.
@@ -188,6 +189,10 @@ type (
 		lastPollTaskErrMessage string
 		lastPollTaskErrStarted time.Time
 		lastPollTaskErrLock    sync.Mutex
+
+		tuner         workerTuner
+		stopPollerCh  chan struct{} // Channel used to stop pollers
+		startPollerCh chan struct{} // Channel used to start pollers
 	}
 
 	polledTask struct {
@@ -247,24 +252,45 @@ func newBaseWorker(
 		logger:             log.With(logger, tagWorkerType, options.workerType),
 		metricsHandler:     metricsHandler.WithTags(metrics.WorkerTags(options.workerType)),
 		taskSlotsAvailable: int32(options.maxConcurrentTask),
-		pollerRequestCh:    make(chan struct{}, options.maxConcurrentTask),
-		taskQueueCh:        make(chan interface{}),                          // no buffer, so poller only able to poll new task after previous is dispatched.
-		eagerTaskQueueCh:   make(chan eagerTask, options.maxConcurrentTask), // allow enough capacity so that eager dispatch will not block
-		fatalErrCb:         options.fatalErrCb,
+		// TODO(quinn) make more configurable
+		pollerRequestCh:  make(chan struct{}, 10*options.maxConcurrentTask),
+		taskQueueCh:      make(chan interface{}),                          // no buffer, so poller only able to poll new task after previous is dispatched.
+		eagerTaskQueueCh: make(chan eagerTask, options.maxConcurrentTask), // allow enough capacity so that eager dispatch will not block
+		fatalErrCb:       options.fatalErrCb,
 
 		limiterContext:       ctx,
 		limiterContextCancel: cancel,
 		sessionTokenBucket:   sessionTokenBucket,
+
+		startPollerCh: make(chan struct{}),
+		stopPollerCh:  make(chan struct{}),
+		tuner:         options.tuner,
 	}
 	// Set secondary retrier as resource exhausted
 	bw.retrier.SetSecondaryRetryPolicy(pollResourceExhaustedRetryPolicy)
 	bw.taskSlotsAvailableGauge = bw.metricsHandler.Gauge(metrics.WorkerTaskSlotsAvailable)
 	bw.taskSlotsAvailableGauge.Update(float64(bw.taskSlotsAvailable))
+	if bw.tuner != nil {
+		bw.tuner.Update(metrics.WorkerTaskSlotsAvailable, float64(bw.taskSlotsAvailable))
+	}
 	if options.pollerRate > 0 {
 		bw.pollLimiter = rate.NewLimiter(rate.Limit(options.pollerRate), 1)
 	}
 
 	return bw
+}
+
+func (bw *baseWorker) addTaskSlot(t int) {
+	if t < 0 {
+		for i := 0; i < -t; i++ {
+			<-bw.pollerRequestCh
+		}
+	} else {
+		for i := 0; i < t; i++ {
+			bw.pollerRequestCh <- struct{}{}
+		}
+	}
+	bw.taskSlotsAvailableGauge.Update(float64(atomic.AddInt32(&bw.taskSlotsAvailable, int32(t))))
 }
 
 // Start starts a fixed set of routines to do the work.
@@ -279,6 +305,19 @@ func (bw *baseWorker) Start() {
 		bw.stopWG.Add(1)
 		go bw.runPoller()
 	}
+
+	bw.stopWG.Add(1)
+	go func() {
+		for {
+			select {
+			case <-bw.startPollerCh:
+				bw.stopWG.Add(1)
+				go bw.runPoller()
+			case <-bw.stopCh:
+				return
+			}
+		}
+	}()
 
 	bw.stopWG.Add(1)
 	go bw.runTaskDispatcher()
@@ -311,6 +350,8 @@ func (bw *baseWorker) runPoller() {
 
 	for {
 		select {
+		case <-bw.stopPollerCh:
+			return
 		case <-bw.stopCh:
 			return
 		case <-bw.pollerRequestCh:
@@ -479,8 +520,14 @@ func (bw *baseWorker) processTask(task interface{}) {
 
 	// Update availability metric
 	bw.taskSlotsAvailableGauge.Update(float64(atomic.AddInt32(&bw.taskSlotsAvailable, -1)))
+	if bw.tuner != nil {
+		bw.tuner.Update(metrics.WorkerTaskSlotsAvailable, float64(atomic.LoadInt32(&bw.taskSlotsAvailable)))
+	}
 	defer func() {
 		bw.taskSlotsAvailableGauge.Update(float64(atomic.AddInt32(&bw.taskSlotsAvailable, 1)))
+		if bw.tuner != nil {
+			bw.tuner.Update(metrics.WorkerTaskSlotsAvailable, float64(atomic.LoadInt32(&bw.taskSlotsAvailable)))
+		}
 	}()
 
 	// If the task is from poller, after processing it we would need to request a new poll. Otherwise, the task is from

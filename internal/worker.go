@@ -239,6 +239,10 @@ type (
 		// is true.
 		// NOTE: Experimental
 		UseBuildIDForVersioning bool
+
+		WorkflowWorkerTuning bool
+
+		ActivityWorkerTuning bool
 	}
 )
 

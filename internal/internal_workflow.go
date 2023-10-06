@@ -995,12 +995,7 @@ func (s *coroutineState) call(timeout time.Duration) {
 	// Defaults are populated in the worker options during worker startup, but test environment
 	// may have no default value for the deadlock detection timeout, so we also need to set it here for
 	// backwards compatibility.
-	if timeout == 0 {
-		timeout = defaultDeadlockDetectionTimeout
-		if debugMode {
-			timeout = unlimitedDeadlockDetectionTimeout
-		}
-	}
+	timeout = unlimitedDeadlockDetectionTimeout
 	deadlockTicker := s.dispatcher.deadlockDetector.begin(timeout)
 	defer deadlockTicker.end()
 

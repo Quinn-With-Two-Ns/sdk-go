@@ -111,6 +111,7 @@ type (
 
 		numNormalPollerMetric *numPollerMetric
 		numStickyPollerMetric *numPollerMetric
+		tuner                 workerTuner
 	}
 
 	// activityTaskPoller implements polling/processing a workflow task
@@ -124,6 +125,7 @@ type (
 		logger              log.Logger
 		activitiesPerSecond float64
 		numPollerMetric     *numPollerMetric
+		tuner               workerTuner
 	}
 
 	historyIteratorImpl struct {
@@ -269,6 +271,7 @@ func newWorkflowTaskPoller(
 	contextManager WorkflowContextManager,
 	service workflowservice.WorkflowServiceClient,
 	params workerExecutionParameters,
+	tuner workerTuner,
 ) *workflowTaskPoller {
 	return &workflowTaskPoller{
 		basePoller: basePoller{
@@ -293,6 +296,7 @@ func newWorkflowTaskPoller(
 		eagerActivityExecutor:        params.eagerActivityExecutor,
 		numNormalPollerMetric:        newNumPollerMetric(params.MetricsHandler, metrics.PollerTypeWorkflowTask),
 		numStickyPollerMetric:        newNumPollerMetric(params.MetricsHandler, metrics.PollerTypeWorkflowStickyTask),
+		tuner:                        tuner,
 	}
 }
 
@@ -758,6 +762,7 @@ func (wtp *workflowTaskPoller) poll(ctx context.Context) (interface{}, error) {
 	request := wtp.getNextPollRequest()
 	defer wtp.release(request.TaskQueue.GetKind())
 
+	t1 := time.Now()
 	response, err := wtp.pollWorkflowTaskQueue(ctx, request)
 	if err != nil {
 		wtp.updateBacklog(request.TaskQueue.GetKind(), 0)
@@ -768,7 +773,22 @@ func (wtp *workflowTaskPoller) poll(ctx context.Context) (interface{}, error) {
 		// Emit using base scope as no workflow type information is available in the case of empty poll
 		wtp.metricsHandler.Counter(metrics.WorkflowTaskQueuePollEmptyCounter).Inc(1)
 		wtp.updateBacklog(request.TaskQueue.GetKind(), 0)
+		if wtp.tuner != nil {
+			wtp.tuner.ReportEmptyPoll()
+		}
 		return &workflowTask{}, nil
+	}
+	d := time.Since(t1)
+	if d < 300*time.Millisecond {
+		if wtp.tuner != nil {
+			wtp.metricsHandler.Counter("temporal_workflow_sync_match").Inc(1)
+			wtp.tuner.ReportSyncMatchPoll()
+		}
+	} else {
+		wtp.metricsHandler.Counter("temporal_workflow_match").Inc(1)
+		if wtp.tuner != nil {
+			wtp.tuner.ReportMatchPoll()
+		}
 	}
 
 	wtp.updateBacklog(request.TaskQueue.GetKind(), response.GetBacklogCountHint())
@@ -791,6 +811,9 @@ func (wtp *workflowTaskPoller) poll(ctx context.Context) (interface{}, error) {
 
 	scheduleToStartLatency := common.TimeValue(response.GetStartedTime()).Sub(common.TimeValue(response.GetScheduledTime()))
 	metricsHandler.Timer(metrics.WorkflowTaskScheduleToStartLatency).Record(scheduleToStartLatency)
+	if wtp.tuner != nil {
+		wtp.tuner.Record(metrics.WorkflowTaskScheduleToStartLatency, scheduleToStartLatency)
+	}
 	return task, nil
 }
 
@@ -891,7 +914,7 @@ func newGetHistoryPageFunc(
 	}
 }
 
-func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowservice.WorkflowServiceClient, params workerExecutionParameters) *activityTaskPoller {
+func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowservice.WorkflowServiceClient, params workerExecutionParameters, tuner workerTuner) *activityTaskPoller {
 	return &activityTaskPoller{
 		basePoller: basePoller{
 			metricsHandler:       params.MetricsHandler,
@@ -908,6 +931,7 @@ func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowserv
 		logger:              params.Logger,
 		activitiesPerSecond: params.TaskQueueActivitiesPerSecond,
 		numPollerMetric:     newNumPollerMetric(params.MetricsHandler, metrics.PollerTypeActivityTask),
+		tuner:               tuner,
 	}
 }
 
@@ -934,15 +958,25 @@ func (atp *activityTaskPoller) poll(ctx context.Context) (interface{}, error) {
 			UseVersioning: atp.useBuildIDVersioning,
 		},
 	}
+	t1 := time.Now()
 
 	response, err := atp.pollActivityTaskQueue(ctx, request)
 	if err != nil {
 		return nil, err
 	}
 	if response == nil || len(response.TaskToken) == 0 {
+		if atp.tuner != nil {
+			atp.tuner.ReportEmptyPoll()
+		}
 		// No activity info is available on empty poll.  Emit using base scope.
 		atp.metricsHandler.Counter(metrics.ActivityPollNoTaskCounter).Inc(1)
 		return &activityTask{}, nil
+	}
+	d := time.Since(t1)
+	if d < 300*time.Millisecond {
+		if atp.tuner != nil {
+			atp.tuner.ReportSyncMatchPoll()
+		}
 	}
 
 	workflowType := response.WorkflowType.GetName()
@@ -951,7 +985,9 @@ func (atp *activityTaskPoller) poll(ctx context.Context) (interface{}, error) {
 
 	scheduleToStartLatency := common.TimeValue(response.GetStartedTime()).Sub(common.TimeValue(response.GetCurrentAttemptScheduledTime()))
 	metricsHandler.Timer(metrics.ActivityScheduleToStartLatency).Record(scheduleToStartLatency)
-
+	if atp.tuner != nil {
+		atp.tuner.Record(metrics.ActivityScheduleToStartLatency, scheduleToStartLatency)
+	}
 	return &activityTask{task: response}, nil
 }
 

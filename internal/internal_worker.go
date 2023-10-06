@@ -98,6 +98,7 @@ type (
 		poller              taskPoller // taskPoller to poll and process the tasks.
 		worker              *baseWorker
 		localActivityWorker *baseWorker
+		tuner               workerTuner
 		identity            string
 		stopC               chan struct{}
 	}
@@ -221,6 +222,9 @@ type (
 		eagerActivityExecutor *eagerActivityExecutor
 
 		capabilities *workflowservice.GetSystemInfoResponse_Capabilities
+
+		workflowWorkerTuning bool
+		activityWorkerTuning bool
 	}
 )
 
@@ -302,7 +306,11 @@ func newWorkflowTaskWorkerInternal(
 	interceptors []WorkerInterceptor,
 ) *workflowWorker {
 	ensureRequiredParams(&params)
-	poller := newWorkflowTaskPoller(taskHandler, contextManager, service, params)
+	var tuner workerTuner
+	if params.workflowWorkerTuning {
+		tuner = newWorkerTuner(params.Logger)
+	}
+	poller := newWorkflowTaskPoller(taskHandler, contextManager, service, params, tuner)
 	worker := newBaseWorker(baseWorkerOptions{
 		pollerCount:       params.MaxConcurrentWorkflowTaskQueuePollers,
 		pollerRate:        defaultPollerRate,
@@ -313,12 +321,15 @@ func newWorkflowTaskWorkerInternal(
 		workerType:        "WorkflowWorker",
 		stopTimeout:       params.WorkerStopTimeout,
 		fatalErrCb:        params.WorkerFatalErrorCallback,
+		tuner:             tuner,
 	},
 		params.Logger,
 		params.MetricsHandler,
 		nil,
 	)
-
+	if params.workflowWorkerTuning {
+		tuner.setWorker(worker)
+	}
 	// laTunnel is the glue that hookup 3 parts
 	laTunnel := newLocalActivityTunnel(params.WorkerStopChannel)
 
@@ -352,6 +363,7 @@ func newWorkflowTaskWorkerInternal(
 		workflowService:     service,
 		poller:              poller,
 		worker:              worker,
+		tuner:               tuner,
 		localActivityWorker: localActivityWorker,
 		identity:            params.Identity,
 		stopC:               stopC,
@@ -366,6 +378,9 @@ func (ww *workflowWorker) Start() error {
 	}
 	ww.localActivityWorker.Start()
 	ww.worker.Start()
+	if ww.tuner != nil {
+		ww.tuner.Start()
+	}
 	return nil // TODO: propagate error
 }
 
@@ -375,6 +390,9 @@ func (ww *workflowWorker) Stop() {
 	// TODO: remove the stop methods in favor of the workerStopChannel
 	ww.localActivityWorker.Stop()
 	ww.worker.Stop()
+	if ww.tuner != nil {
+		ww.tuner.Stop()
+	}
 }
 
 func newSessionWorker(service workflowservice.WorkflowServiceClient, params workerExecutionParameters, overrides *workerOverrides, env *registry, maxConcurrentSessionExecutionSize int) *sessionWorker {
@@ -441,8 +459,11 @@ func newActivityWorker(service workflowservice.WorkflowServiceClient, params wor
 
 func newActivityTaskWorker(taskHandler ActivityTaskHandler, service workflowservice.WorkflowServiceClient, workerParams workerExecutionParameters, sessionTokenBucket *sessionTokenBucket, stopC chan struct{}) (worker *activityWorker) {
 	ensureRequiredParams(&workerParams)
-
-	poller := newActivityTaskPoller(taskHandler, service, workerParams)
+	var tuner workerTuner
+	if workerParams.activityWorkerTuning {
+		tuner = newWorkerTuner(workerParams.Logger)
+	}
+	poller := newActivityTaskPoller(taskHandler, service, workerParams, tuner)
 
 	base := newBaseWorker(
 		baseWorkerOptions{
@@ -456,11 +477,15 @@ func newActivityTaskWorker(taskHandler ActivityTaskHandler, service workflowserv
 			stopTimeout:       workerParams.WorkerStopTimeout,
 			fatalErrCb:        workerParams.WorkerFatalErrorCallback,
 			userContextCancel: workerParams.UserContextCancel,
+			tuner:             tuner,
 		},
 		workerParams.Logger,
 		workerParams.MetricsHandler,
 		sessionTokenBucket,
 	)
+	if workerParams.activityWorkerTuning {
+		tuner.setWorker(base)
+	}
 
 	return &activityWorker{
 		executionParameters: workerParams,
@@ -479,6 +504,9 @@ func (aw *activityWorker) Start() error {
 		return err
 	}
 	aw.worker.Start()
+	if aw.worker.tuner != nil {
+		aw.worker.tuner.Start()
+	}
 	return nil // TODO: propagate errors
 }
 
@@ -486,6 +514,9 @@ func (aw *activityWorker) Start() error {
 func (aw *activityWorker) Stop() {
 	close(aw.stopC)
 	aw.worker.Stop()
+	if aw.worker.tuner != nil {
+		aw.worker.tuner.Stop()
+	}
 }
 
 type registry struct {
@@ -1513,7 +1544,8 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 	var capabilities workflowservice.GetSystemInfoResponse_Capabilities
 
 	cache := NewWorkerCache()
-	workerParams := workerExecutionParameters{
+	var workerParams workerExecutionParameters
+	workerParams = workerExecutionParameters{
 		Namespace:                             client.namespace,
 		TaskQueue:                             taskQueue,
 		ConcurrentActivityExecutionSize:       options.MaxConcurrentActivityExecutionSize,
@@ -1548,7 +1580,9 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 			taskQueue:     taskQueue,
 			maxConcurrent: options.MaxConcurrentEagerActivityExecutionSize,
 		}),
-		capabilities: &capabilities,
+		capabilities:         &capabilities,
+		workflowWorkerTuning: options.WorkflowWorkerTuning,
+		activityWorkerTuning: options.ActivityWorkerTuning,
 	}
 
 	if options.Identity != "" {
