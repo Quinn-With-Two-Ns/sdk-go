@@ -270,10 +270,19 @@ type (
 		Memo map[string]interface{}
 
 		// SearchAttributes - Optional indexed info that can be used in query of List/Scan/Count workflow APIs (only
-		// supported when Temporal server is using advanced visiblity). The key and value type must be registered on Temporal server side.
+		// supported when Temporal server is using advanced visibility). The key and value type must be registered on Temporal server side.
 		// Use GetSearchAttributes API to get valid key and corresponding value type.
 		// On ScheduleHandle.Describe() or ScheduleHandle.Update() SearchAttributes will be returned as *commonpb.Payload.
+		//
+		// Deprecated: Use TypedSearchAttributes instead.
 		SearchAttributes map[string]interface{}
+
+		// TypedSearchAttributes - Specifies Search Attributes that will be attached to the Workflow. Search Attributes are
+		// additional indexed information attributed to workflow and used for search and visibility. The search attributes can be
+		// used in query of List/Scan/Count workflow APIs. The key and its value type must be registered on Temporal server side.
+		//
+		// Optional: default to nil.
+		TypedSearchAttributes SearchAttributes
 	}
 
 	// ScheduleOptions configure the parameters for creating a schedule.
@@ -341,7 +350,16 @@ type (
 		// SearchAttributes - Optional indexed info that can be used in query of List schedules APIs (only
 		// supported when Temporal server is using advanced visibility). The key and value type must be registered on Temporal server side.
 		// Use GetSearchAttributes API to get valid key and corresponding value type.
+		//
+		// Deprecated: Use TypedSearchAttributes instead.
 		SearchAttributes map[string]interface{}
+
+		// TypedSearchAttributes- Optional indexed info that can be used in query of List schedules APIs (only
+		// supported when Temporal server is using advanced visibility). The key and value type must be registered on Temporal server side.
+		// Use GetSearchAttributes API to get valid key and corresponding value type.
+		//
+		// Optional: default to nil.
+		TypedSearchAttributes SearchAttributes
 	}
 
 	// ScheduleWorkflowExecution contains details on a workflows execution stared by a schedule.
@@ -398,7 +416,11 @@ type (
 		// SearchAttributes - Indexed info that can be used in query of List schedules APIs (only
 		// supported when Temporal server is using advanced visibility). The key and value type must be registered on Temporal server side.
 		// Use GetSearchAttributes API to get valid key and corresponding value type.
+		//
+		// Deprecated: Use [ScheduleDescription.TypedSearchAttributes]
 		SearchAttributes *commonpb.SearchAttributes
+
+		TypedSearchAttributes SearchAttributes
 	}
 
 	// SchedulePolicies describes the current polcies of a schedule.
@@ -574,7 +596,14 @@ type (
 		// SearchAttributes - Indexed info that can be used in query of List schedules APIs (only
 		// supported when Temporal server is using advanced visibility). The key and value type must be registered on Temporal server side.
 		// Use GetSearchAttributes API to get valid key and corresponding value type.
+		//
+		// Deprecated: use [ScheduleListEntry.TypedSearchAttributes] instead
 		SearchAttributes *commonpb.SearchAttributes
+
+		// TypedSearchAttributes - Indexed info that can be used in query of List schedules APIs (only
+		// supported when Temporal server is using advanced visibility). The key and value type must be registered on Temporal server side.
+		// Use GetSearchAttributes API to get valid key and corresponding value type.
+		TypedSearchAttributes SearchAttributes
 	}
 
 	// ScheduleListOptions are the parameters for configuring listing schedules

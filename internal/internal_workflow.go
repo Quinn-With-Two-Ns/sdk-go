@@ -191,6 +191,7 @@ type (
 		ContextPropagators       []ContextPropagator
 		Memo                     map[string]interface{}
 		SearchAttributes         map[string]interface{}
+		TypedSearchAttributes    SearchAttributes
 		ParentClosePolicy        enumspb.ParentClosePolicy
 		signalChannels           map[string]Channel
 		queryHandlers            map[string]*queryHandler

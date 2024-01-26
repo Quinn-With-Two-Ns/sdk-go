@@ -354,6 +354,7 @@ func (w *Workflows) ContinueAsNewWithOptions(ctx workflow.Context, count int, ta
 		return "", fmt.Errorf("invalid taskQueueName name, expected=%v, got=%v", taskQueue, tq)
 	}
 
+	//lint:ignore SA1019 keep test for SearchAttributes
 	if info.Memo == nil || info.SearchAttributes == nil || info.RetryPolicy == nil {
 		return "", errors.New("memo, search attributes, and/or retry policy are not carried over")
 	}
@@ -364,6 +365,7 @@ func (w *Workflows) ContinueAsNewWithOptions(ctx workflow.Context, count int, ta
 	}
 
 	var searchAttrVal string
+	//lint:ignore SA1019 keep test for SearchAttributes
 	err = converter.GetDefaultDataConverter().FromPayload(info.SearchAttributes.IndexedFields["CustomKeywordField"], &searchAttrVal)
 	if err != nil {
 		return "", errors.New("error when get search attribute value")
@@ -1030,6 +1032,7 @@ func (w *Workflows) childForMemoAndSearchAttr(ctx workflow.Context) (result stri
 		return
 	}
 	var searchAttrVal string
+	//lint:ignore SA1019 keep test for SearchAttributes
 	err = converter.GetDefaultDataConverter().FromPayload(info.SearchAttributes.IndexedFields["CustomKeywordField"], &searchAttrVal)
 	if err != nil {
 		return
@@ -1719,6 +1722,7 @@ func (w *Workflows) InterceptorCalls(ctx workflow.Context, someVal string) (stri
 	_ = workflow.Sleep(ctx, 1*time.Millisecond)
 	_ = workflow.RequestCancelExternalWorkflow(ctx, "badid", "").Get(ctx, nil)
 	_ = workflow.SignalExternalWorkflow(ctx, "badid", "", "badsignal", nil).Get(ctx, nil)
+	//lint:ignore SA1019 keep test for SearchAttributes
 	_ = workflow.UpsertSearchAttributes(ctx, nil)
 	_ = workflow.UpsertMemo(ctx, nil)
 	workflow.SideEffect(ctx, func(workflow.Context) interface{} { return "sideeffect" })
@@ -2010,6 +2014,69 @@ func (w *Workflows) ForcedNonDeterminism(ctx workflow.Context, sameCommandButDif
 	return
 }
 
+func (w *Workflows) ScheduleTypedSearchAttributesWorkflow(ctx workflow.Context) (string, error) {
+	attributes := workflow.GetTypedSearchAttributes(ctx)
+
+	scheduleStartTimeKey := temporal.NewSearchAttributeKeyTime("TemporalScheduledStartTime")
+	scheduleByIDKey := temporal.NewSearchAttributeKeyword("TemporalScheduledById")
+
+	_, ok := attributes.GetTime(scheduleStartTimeKey)
+	if !ok {
+		return "", errors.New("missing TemporalScheduledStartTime")
+	}
+
+	scheduleByID, ok := attributes.GetKeyword(scheduleByIDKey)
+	if !ok {
+		return "", errors.New("missing TemporalScheduledById")
+	}
+	return scheduleByID, nil
+}
+
+func (w *Workflows) UpsertTypedSearchAttributesWorkflow(ctx workflow.Context, sleepBetweenUpsert bool) error {
+	//
+	attributes := workflow.GetTypedSearchAttributes(ctx)
+	stringKey := temporal.NewSearchAttributeKeyString("CustomStringField")
+	value, ok := attributes.GetString(stringKey)
+	if !ok || value != "CustomStringFieldValue" {
+		return errors.New("search attribute CustomStringField not present or value incorrect")
+	}
+
+	// Add a new search attribute
+	key := temporal.NewSearchAttributeKeyword("CustomKeywordField")
+	err := workflow.UpsertTypedSearchAttributes(ctx, key.ValueSet("CustomKeywordFieldValue"))
+	if err != nil {
+		return err
+	}
+	if sleepBetweenUpsert {
+		_ = workflow.Sleep(ctx, 1*time.Second)
+	}
+
+	// Verify the search attributes is added
+	attributes = workflow.GetTypedSearchAttributes(ctx)
+	value, ok = attributes.GetKeyword(key)
+	if !ok || value != "CustomKeywordFieldValue" {
+		return errors.New("search attribute CustomKeywordField not present or value incorrect")
+	}
+
+	// Remove a search attribute
+	err = workflow.UpsertTypedSearchAttributes(ctx, key.ValueUnset())
+	if err != nil {
+		return err
+	}
+	if sleepBetweenUpsert {
+		_ = workflow.Sleep(ctx, 1*time.Second)
+	}
+
+	// Verify the search attributes is removed
+	attributes = workflow.GetTypedSearchAttributes(ctx)
+	value, ok = attributes.GetKeyword(key)
+	if ok || value != "" {
+		return errors.New("search attribute CustomKeywordField not deleted")
+	}
+	return nil
+
+}
+
 func (w *Workflows) UpsertSearchAttributesConditional(ctx workflow.Context, maxTicks int) error {
 	var waitTickCount int
 	tickCh := workflow.GetSignalChannel(ctx, "tick")
@@ -2021,6 +2088,7 @@ func (w *Workflows) UpsertSearchAttributesConditional(ctx workflow.Context, maxT
 	if err != nil {
 		return err
 	}
+	//lint:ignore SA1019 keep test for SearchAttributes
 	currentPayload, exists := workflow.GetInfo(ctx).SearchAttributes.GetIndexedFields()["CustomKeywordField"]
 	if !exists {
 		return errors.New("search attribute not present")
@@ -2035,6 +2103,7 @@ func (w *Workflows) UpsertSearchAttributesConditional(ctx workflow.Context, maxT
 	if searchAttr == "set" {
 		err = workflow.Sleep(ctx, 100*time.Millisecond)
 	} else if searchAttr == "unset" {
+		//lint:ignore SA1019 keep test for SearchAttributes
 		err = workflow.UpsertSearchAttributes(ctx, map[string]interface{}{"CustomKeywordField": "set"})
 	} else {
 		return errors.New("unkown search attribute value")
@@ -2309,6 +2378,8 @@ func (w *Workflows) register(worker worker.Worker) {
 	worker.RegisterWorkflow(w.HistoryLengths)
 	worker.RegisterWorkflow(w.HeartbeatSpecificCount)
 	worker.RegisterWorkflow(w.UpsertMemo)
+	worker.RegisterWorkflow(w.UpsertTypedSearchAttributesWorkflow)
+	worker.RegisterWorkflow(w.ScheduleTypedSearchAttributesWorkflow)
 	worker.RegisterWorkflow(w.SessionFailedStateWorkflow)
 	worker.RegisterWorkflow(w.VersionLoopWorkflow)
 

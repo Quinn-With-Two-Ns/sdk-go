@@ -95,6 +95,7 @@ func Workflow2(ctx workflow.Context, name string) error {
 
 	workflow.GetVersion(ctx, "test-change", workflow.DefaultVersion, 1)
 
+	//lint:ignore SA1019 keep test for SearchAttributes
 	_ = workflow.UpsertSearchAttributes(ctx, map[string]interface{}{"CustomKeywordField": "testkey"})
 
 	workflow.GetVersion(ctx, "test-change-2", workflow.DefaultVersion, 1)
@@ -169,6 +170,7 @@ func UpsertMemoWorkflow(ctx workflow.Context, memo string) error {
 }
 
 func UpsertSearchAttributesWorkflow(ctx workflow.Context, field string) error {
+	//lint:ignore SA1019 keep test for SearchAttributes
 	err := workflow.UpsertSearchAttributes(ctx, map[string]interface{}{
 		"CustomStringField": field,
 	})
@@ -187,6 +189,7 @@ func UpsertSearchAttributesWorkflow(ctx workflow.Context, field string) error {
 		return err
 	}
 
+	//lint:ignore SA1019 keep test for SearchAttributes
 	return workflow.UpsertSearchAttributes(ctx, map[string]interface{}{
 		"CustomStringField": field,
 	})

@@ -31,6 +31,7 @@ import (
 	"go.temporal.io/sdk/internal"
 	"go.temporal.io/sdk/internal/common/metrics"
 	"go.temporal.io/sdk/log"
+	"go.temporal.io/sdk/temporal"
 )
 
 type (
@@ -65,6 +66,9 @@ type (
 	// the workflow should continue as new with the same WorkflowID, but new RunID and new history.
 	ContinueAsNewError = internal.ContinueAsNewError
 
+	// UpdateHandlerOptions consists of options for executing a named workflow update.
+	//
+	// NOTE: Experimental
 	UpdateHandlerOptions = internal.UpdateHandlerOptions
 )
 
@@ -197,6 +201,12 @@ func GetInfo(ctx Context) *Info {
 	return internal.GetWorkflowInfo(ctx)
 }
 
+// GetTypedSearchAttributes returns a collection of the search attributes currently set for this workflow
+func GetTypedSearchAttributes(ctx Context) temporal.SearchAttributes {
+	return internal.GetTypedSearchAttributes(ctx)
+}
+
+// GetUpdateInfo extracts info of a currently running update from a context.
 func GetUpdateInfo(ctx Context) *UpdateInfo {
 	return internal.GetUpdateInfo(ctx)
 }
@@ -569,8 +579,15 @@ func GetLastError(ctx Context) error {
 //	}
 //
 // This is only supported when using ElasticSearch.
+//
+// Deprecated: use [UpsertTypedSearchAttributes] instead
 func UpsertSearchAttributes(ctx Context, attributes map[string]interface{}) error {
 	return internal.UpsertSearchAttributes(ctx, attributes)
+}
+
+// UpsertTypedSearchAttributes
+func UpsertTypedSearchAttributes(ctx Context, searchAttributeUpdate ...temporal.SearchAttributeUpdate) error {
+	return internal.UpsertTypedSearchAttributes(ctx, searchAttributeUpdate...)
 }
 
 // UpsertMemo is used to add or update workflow memo.

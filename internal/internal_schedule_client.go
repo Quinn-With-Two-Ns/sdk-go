@@ -503,8 +503,9 @@ func scheduleDescriptionFromPB(describeResponse *workflowservice.DescribeSchedul
 			CreatedAt:                     common.TimeValue(describeResponse.Info.GetCreateTime()),
 			LastUpdateAt:                  common.TimeValue(describeResponse.Info.GetUpdateTime()),
 		},
-		Memo:             describeResponse.Memo,
-		SearchAttributes: describeResponse.SearchAttributes,
+		Memo:                  describeResponse.Memo,
+		SearchAttributes:      describeResponse.SearchAttributes,
+		TypedSearchAttributes: convertToTypeSearchAttributes(nil, describeResponse.SearchAttributes.GetIndexedFields()),
 	}, nil
 }
 
@@ -551,10 +552,11 @@ func convertFromPBScheduleListEntry(schedule *schedulepb.ScheduleListEntry) *Sch
 		WorkflowType: WorkflowType{
 			Name: scheduleInfo.GetWorkflowType().GetName(),
 		},
-		RecentActions:    recentActions,
-		NextActionTimes:  nextActionTimes,
-		Memo:             schedule.Memo,
-		SearchAttributes: schedule.SearchAttributes,
+		RecentActions:         recentActions,
+		NextActionTimes:       nextActionTimes,
+		Memo:                  schedule.Memo,
+		SearchAttributes:      schedule.SearchAttributes,
+		TypedSearchAttributes: convertToTypeSearchAttributes(nil, schedule.SearchAttributes.GetIndexedFields()),
 	}
 }
 
@@ -588,7 +590,7 @@ func convertToPBScheduleAction(ctx context.Context, client *WorkflowClient, sche
 			return nil, err
 		}
 
-		searchAttr, err := serializeSearchAttributes(action.SearchAttributes)
+		searchAttr, err := GetSearchAttributes(action.SearchAttributes, action.TypedSearchAttributes)
 		if err != nil {
 			return nil, err
 		}

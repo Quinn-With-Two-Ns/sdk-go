@@ -595,7 +595,16 @@ type (
 		// SearchAttributes - Optional indexed info that can be used in query of List/Scan/Count workflow APIs (only
 		// supported when Temporal server is using ElasticSearch). The key and value type must be registered on Temporal server side.
 		// Use GetSearchAttributes API to get valid key and corresponding value type.
+		//
+		// Deprecated: use TypedSearchAttributes instead.
 		SearchAttributes map[string]interface{}
+
+		// TypedSearchAttributes - Specifies Search Attributes that will be attached to the Workflow. Search Attributes are
+		// additional indexed information attributed to workflow and used for search and visibility. The search attributes can be
+		// used in query of List/Scan/Count workflow APIs. The key and its value type must be registered on Temporal server side.
+		//
+		// Optional: default to nil.
+		TypedSearchAttributes SearchAttributes
 	}
 
 	// RetryPolicy defines the retry policy.
