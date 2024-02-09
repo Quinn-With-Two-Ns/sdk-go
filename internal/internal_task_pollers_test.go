@@ -117,7 +117,7 @@ func TestWFTRacePrevention(t *testing.T) {
 			return &workflowservice.RespondWorkflowTaskFailedResponse{}, nil
 		})
 
-	poller := newWorkflowTaskPoller(taskHandler, contextManager, client, params)
+	poller := newWorkflowTaskPoller(taskHandler, contextManager, client, nil, params)
 
 	t.Log("Issue task0")
 	go func() { resultsChan <- poller.processWorkflowTask(&task0) }()
@@ -208,7 +208,7 @@ func TestWFTCorruption(t *testing.T) {
 			return nil, errors.New("Failure responding to workflow task")
 		})
 
-	poller := newWorkflowTaskPoller(taskHandler, contextManager, client, params)
+	poller := newWorkflowTaskPoller(taskHandler, contextManager, client, nil, params)
 	processTaskDone := make(chan struct{})
 	go func() {
 		require.Error(t, poller.processWorkflowTask(&task0))

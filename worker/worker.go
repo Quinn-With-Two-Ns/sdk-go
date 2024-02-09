@@ -216,6 +216,9 @@ type (
 
 	// ReplayWorkflowHistoryOptions are options for replaying a workflow.
 	ReplayWorkflowHistoryOptions = internal.ReplayWorkflowHistoryOptions
+
+	// PollerTuningOptions is used to configure the poller tuning options.
+	PollerTuningOptions = internal.PollerTuningOptions
 )
 
 const (

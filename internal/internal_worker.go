@@ -141,14 +141,14 @@ type (
 		// Defines rate limiting on number of activity tasks that can be executed per second per worker.
 		WorkerActivitiesPerSecond float64
 
-		// MaxConcurrentActivityTaskQueuePollers is the max number of pollers for activity task queue.
-		MaxConcurrentActivityTaskQueuePollers int
+		// InitialConcurrentActivityTaskQueuePollers is the initial number of pollers for activity task queue.
+		InitialConcurrentActivityTaskQueuePollers int
 
 		// Defines how many concurrent workflow task executions by this worker.
 		ConcurrentWorkflowTaskExecutionSize int
 
-		// MaxConcurrentWorkflowTaskQueuePollers is the max number of pollers for workflow task queue.
-		MaxConcurrentWorkflowTaskQueuePollers int
+		// InitialConcurrentWorkflowTaskQueuePollers is the initial number of pollers for workflow task queue.
+		InitialConcurrentWorkflowTaskQueuePollers int
 
 		// Defines how many concurrent local activity executions by this worker.
 		ConcurrentLocalActivityExecutionSize int
@@ -215,6 +215,10 @@ type (
 
 		MaxHeartbeatThrottleInterval time.Duration
 
+		WorkflowPollerAutotuneOptions *PollerTuningOptions
+
+		ActivityPollerAutotuneOptions *PollerTuningOptions
+
 		// Pointer to the shared worker cache
 		cache *WorkerCache
 
@@ -228,6 +232,18 @@ type (
 		// LastEventID, if set, will only load history up to this ID (inclusive).
 		LastEventID int64
 	}
+
+	pollerFeedbackReporterImpl struct {
+		logger log.Logger
+		ch     chan struct{}
+		// TODO(quinn) profile a mutex vs atomic perf
+		// mu protects the following fields.
+		mu                  sync.Mutex
+		syncPollCount       int
+		successfulPollCount int
+		emptyPollCount      int
+		errorPollCount      int
+	}
 )
 
 var debugMode = os.Getenv("TEMPORAL_DEBUG") != ""
@@ -235,6 +251,13 @@ var debugMode = os.Getenv("TEMPORAL_DEBUG") != ""
 // newWorkflowWorker returns an instance of the workflow worker.
 func newWorkflowWorker(service workflowservice.WorkflowServiceClient, params workerExecutionParameters, ppMgr pressurePointMgr, registry *registry) *workflowWorker {
 	return newWorkflowWorkerInternal(service, params, ppMgr, nil, registry)
+}
+
+func newPollerFeedbackReporter(logger log.Logger) *pollerFeedbackReporterImpl {
+	return &pollerFeedbackReporterImpl{
+		logger: logger,
+		ch:     make(chan struct{}),
+	}
 }
 
 func ensureRequiredParams(params *workerExecutionParameters) {
@@ -308,21 +331,31 @@ func newWorkflowTaskWorkerInternal(
 	interceptors []WorkerInterceptor,
 ) *workflowWorker {
 	ensureRequiredParams(&params)
-	poller := newWorkflowTaskPoller(taskHandler, contextManager, service, params)
-	worker := newBaseWorker(baseWorkerOptions{
-		pollerCount:       params.MaxConcurrentWorkflowTaskQueuePollers,
-		pollerRate:        defaultPollerRate,
-		maxConcurrentTask: params.ConcurrentWorkflowTaskExecutionSize,
-		maxTaskPerSecond:  defaultWorkerTaskExecutionRate,
-		taskWorker:        poller,
-		identity:          params.Identity,
-		workerType:        "WorkflowWorker",
-		stopTimeout:       params.WorkerStopTimeout,
-		fatalErrCb:        params.WorkerFatalErrorCallback,
-	},
+	feedbackReporter := newPollerFeedbackReporter(params.Logger)
+	poller := newWorkflowTaskPoller(taskHandler, contextManager, service, feedbackReporter, params)
+	bwo := baseWorkerOptions{
+		initialPollerCount: params.InitialConcurrentWorkflowTaskQueuePollers,
+		pollerRate:         defaultPollerRate,
+		maxConcurrentTask:  params.ConcurrentWorkflowTaskExecutionSize,
+		maxTaskPerSecond:   defaultWorkerTaskExecutionRate,
+		taskWorker:         poller,
+		identity:           params.Identity,
+		workerType:         "WorkflowWorker",
+		stopTimeout:        params.WorkerStopTimeout,
+		fatalErrCb:         params.WorkerFatalErrorCallback,
+	}
+	if params.WorkflowPollerAutotuneOptions != nil {
+		bwo.enablePollerTuning = true
+		bwo.minPollerCount = params.WorkflowPollerAutotuneOptions.MinimumConcurrentTaskQueuePollers
+		bwo.maxPollerCount = params.WorkflowPollerAutotuneOptions.MaxConcurrentTaskQueuePollers
+	}
+
+	worker := newBaseWorker(
+		bwo,
 		params.Logger,
 		params.MetricsHandler,
 		nil,
+		feedbackReporter,
 	)
 
 	// laTunnel is the glue that hookup 3 parts
@@ -336,17 +369,18 @@ func newWorkflowTaskWorkerInternal(
 	// 2) local activity task poller will poll from laTunnel, and result will be pushed to laTunnel
 	localActivityTaskPoller := newLocalActivityPoller(params, laTunnel, interceptors)
 	localActivityWorker := newBaseWorker(baseWorkerOptions{
-		pollerCount:       1, // 1 poller (from local channel) is enough for local activity
-		maxConcurrentTask: params.ConcurrentLocalActivityExecutionSize,
-		maxTaskPerSecond:  params.WorkerLocalActivitiesPerSecond,
-		taskWorker:        localActivityTaskPoller,
-		identity:          params.Identity,
-		workerType:        "LocalActivityWorker",
-		stopTimeout:       params.WorkerStopTimeout,
-		fatalErrCb:        params.WorkerFatalErrorCallback,
+		initialPollerCount: 1, // 1 poller (from local channel) is enough for local activity
+		maxConcurrentTask:  params.ConcurrentLocalActivityExecutionSize,
+		maxTaskPerSecond:   params.WorkerLocalActivitiesPerSecond,
+		taskWorker:         localActivityTaskPoller,
+		identity:           params.Identity,
+		workerType:         "LocalActivityWorker",
+		stopTimeout:        params.WorkerStopTimeout,
+		fatalErrCb:         params.WorkerFatalErrorCallback,
 	},
 		params.Logger,
 		params.MetricsHandler,
+		nil,
 		nil,
 	)
 
@@ -398,7 +432,9 @@ func newSessionWorker(service workflowservice.WorkflowServiceClient, params work
 	params.TaskQueue = sessionEnvironment.GetResourceSpecificTaskqueue()
 	activityWorker := newActivityWorker(service, params, overrides, env, nil)
 
-	params.MaxConcurrentActivityTaskQueuePollers = 1
+	params.InitialConcurrentActivityTaskQueuePollers = 1
+	params.ActivityPollerAutotuneOptions = nil
+	params.WorkflowPollerAutotuneOptions = nil
 	params.TaskQueue = creationTaskqueue
 	// Although we have session token bucket to limit session size across creation
 	// and recreation, we also limit it here for creation only
@@ -447,25 +483,32 @@ func newActivityWorker(service workflowservice.WorkflowServiceClient, params wor
 
 func newActivityTaskWorker(taskHandler ActivityTaskHandler, service workflowservice.WorkflowServiceClient, workerParams workerExecutionParameters, sessionTokenBucket *sessionTokenBucket, stopC chan struct{}) (worker *activityWorker) {
 	ensureRequiredParams(&workerParams)
-
-	poller := newActivityTaskPoller(taskHandler, service, workerParams)
+	feedbackReporter := newPollerFeedbackReporter(workerParams.Logger)
+	poller := newActivityTaskPoller(taskHandler, service, workerParams, feedbackReporter)
+	bwo := baseWorkerOptions{
+		initialPollerCount: workerParams.InitialConcurrentActivityTaskQueuePollers,
+		pollerRate:         defaultPollerRate,
+		maxConcurrentTask:  workerParams.ConcurrentActivityExecutionSize,
+		maxTaskPerSecond:   workerParams.WorkerActivitiesPerSecond,
+		taskWorker:         poller,
+		identity:           workerParams.Identity,
+		workerType:         "ActivityWorker",
+		stopTimeout:        workerParams.WorkerStopTimeout,
+		fatalErrCb:         workerParams.WorkerFatalErrorCallback,
+		userContextCancel:  workerParams.UserContextCancel,
+	}
+	if workerParams.ActivityPollerAutotuneOptions != nil {
+		bwo.enablePollerTuning = true
+		bwo.minPollerCount = workerParams.ActivityPollerAutotuneOptions.MinimumConcurrentTaskQueuePollers
+		bwo.maxPollerCount = workerParams.ActivityPollerAutotuneOptions.MaxConcurrentTaskQueuePollers
+	}
 
 	base := newBaseWorker(
-		baseWorkerOptions{
-			pollerCount:       workerParams.MaxConcurrentActivityTaskQueuePollers,
-			pollerRate:        defaultPollerRate,
-			maxConcurrentTask: workerParams.ConcurrentActivityExecutionSize,
-			maxTaskPerSecond:  workerParams.WorkerActivitiesPerSecond,
-			taskWorker:        poller,
-			identity:          workerParams.Identity,
-			workerType:        "ActivityWorker",
-			stopTimeout:       workerParams.WorkerStopTimeout,
-			fatalErrCb:        workerParams.WorkerFatalErrorCallback,
-			userContextCancel: workerParams.UserContextCancel,
-		},
+		bwo,
 		workerParams.Logger,
 		workerParams.MetricsHandler,
 		sessionTokenBucket,
+		feedbackReporter,
 	)
 
 	return &activityWorker{
@@ -1560,37 +1603,48 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 	// should take a pointer to this struct and wait for it to be populated when the worker is run.
 	var capabilities workflowservice.GetSystemInfoResponse_Capabilities
 
+	initialConcurrentActivityTaskQueuePollers := options.MaxConcurrentActivityTaskPollers
+	if options.ActivityPollerTuningOptions != nil {
+		initialConcurrentActivityTaskQueuePollers = options.ActivityPollerTuningOptions.InitialConcurrentTaskQueuePollers
+	}
+	initialConcurrentWorkflowTaskQueuePollers := options.MaxConcurrentWorkflowTaskPollers
+	if options.WorkflowPollerTuningOptions != nil {
+		initialConcurrentWorkflowTaskQueuePollers = options.WorkflowPollerTuningOptions.InitialConcurrentTaskQueuePollers
+	}
+
 	cache := NewWorkerCache()
 	workerParams := workerExecutionParameters{
-		Namespace:                             client.namespace,
-		TaskQueue:                             taskQueue,
-		ConcurrentActivityExecutionSize:       options.MaxConcurrentActivityExecutionSize,
-		WorkerActivitiesPerSecond:             options.WorkerActivitiesPerSecond,
-		MaxConcurrentActivityTaskQueuePollers: options.MaxConcurrentActivityTaskPollers,
-		ConcurrentLocalActivityExecutionSize:  options.MaxConcurrentLocalActivityExecutionSize,
-		WorkerLocalActivitiesPerSecond:        options.WorkerLocalActivitiesPerSecond,
-		ConcurrentWorkflowTaskExecutionSize:   options.MaxConcurrentWorkflowTaskExecutionSize,
-		MaxConcurrentWorkflowTaskQueuePollers: options.MaxConcurrentWorkflowTaskPollers,
-		Identity:                              client.identity,
-		WorkerBuildID:                         options.BuildID,
-		UseBuildIDForVersioning:               options.UseBuildIDForVersioning,
-		MetricsHandler:                        client.metricsHandler.WithTags(metrics.TaskQueueTags(taskQueue)),
-		Logger:                                client.logger,
-		EnableLoggingInReplay:                 options.EnableLoggingInReplay,
-		UserContext:                           backgroundActivityContext,
-		UserContextCancel:                     backgroundActivityContextCancel,
-		StickyScheduleToStartTimeout:          options.StickyScheduleToStartTimeout,
-		TaskQueueActivitiesPerSecond:          options.TaskQueueActivitiesPerSecond,
-		WorkflowPanicPolicy:                   options.WorkflowPanicPolicy,
-		DataConverter:                         client.dataConverter,
-		FailureConverter:                      client.failureConverter,
-		WorkerStopTimeout:                     options.WorkerStopTimeout,
-		WorkerFatalErrorCallback:              fatalErrorCallback,
-		ContextPropagators:                    client.contextPropagators,
-		DeadlockDetectionTimeout:              options.DeadlockDetectionTimeout,
-		DefaultHeartbeatThrottleInterval:      options.DefaultHeartbeatThrottleInterval,
-		MaxHeartbeatThrottleInterval:          options.MaxHeartbeatThrottleInterval,
-		cache:                                 cache,
+		Namespace:                       client.namespace,
+		TaskQueue:                       taskQueue,
+		ConcurrentActivityExecutionSize: options.MaxConcurrentActivityExecutionSize,
+		WorkerActivitiesPerSecond:       options.WorkerActivitiesPerSecond,
+		InitialConcurrentActivityTaskQueuePollers: initialConcurrentActivityTaskQueuePollers,
+		ConcurrentLocalActivityExecutionSize:      options.MaxConcurrentLocalActivityExecutionSize,
+		WorkerLocalActivitiesPerSecond:            options.WorkerLocalActivitiesPerSecond,
+		ConcurrentWorkflowTaskExecutionSize:       options.MaxConcurrentWorkflowTaskExecutionSize,
+		InitialConcurrentWorkflowTaskQueuePollers: initialConcurrentWorkflowTaskQueuePollers,
+		Identity:                         client.identity,
+		WorkerBuildID:                    options.BuildID,
+		UseBuildIDForVersioning:          options.UseBuildIDForVersioning,
+		MetricsHandler:                   client.metricsHandler.WithTags(metrics.TaskQueueTags(taskQueue)),
+		Logger:                           client.logger,
+		EnableLoggingInReplay:            options.EnableLoggingInReplay,
+		UserContext:                      backgroundActivityContext,
+		UserContextCancel:                backgroundActivityContextCancel,
+		StickyScheduleToStartTimeout:     options.StickyScheduleToStartTimeout,
+		TaskQueueActivitiesPerSecond:     options.TaskQueueActivitiesPerSecond,
+		WorkflowPanicPolicy:              options.WorkflowPanicPolicy,
+		DataConverter:                    client.dataConverter,
+		FailureConverter:                 client.failureConverter,
+		WorkerStopTimeout:                options.WorkerStopTimeout,
+		WorkerFatalErrorCallback:         fatalErrorCallback,
+		ContextPropagators:               client.contextPropagators,
+		DeadlockDetectionTimeout:         options.DeadlockDetectionTimeout,
+		DefaultHeartbeatThrottleInterval: options.DefaultHeartbeatThrottleInterval,
+		MaxHeartbeatThrottleInterval:     options.MaxHeartbeatThrottleInterval,
+		ActivityPollerAutotuneOptions:    options.ActivityPollerTuningOptions,
+		WorkflowPollerAutotuneOptions:    options.WorkflowPollerTuningOptions,
+		cache:                            cache,
 		eagerActivityExecutor: newEagerActivityExecutor(eagerActivityExecutorOptions{
 			disabled:      options.DisableEagerActivities,
 			taskQueue:     taskQueue,
@@ -1670,8 +1724,8 @@ func processTestTags(wOptions *WorkerOptions, ep *workerExecutionParameters) {
 				switch key {
 				case workerOptionsConfigConcurrentPollRoutineSize:
 					if size, err := strconv.Atoi(val); err == nil {
-						ep.MaxConcurrentActivityTaskQueuePollers = size
-						ep.MaxConcurrentWorkflowTaskQueuePollers = size
+						ep.InitialConcurrentActivityTaskQueuePollers = size
+						ep.InitialConcurrentWorkflowTaskQueuePollers = size
 					}
 				}
 			}
@@ -1876,4 +1930,67 @@ func executeFunction(fn interface{}, args []interface{}) (interface{}, error) {
 		res = retValues[0].Interface()
 	}
 	return res, err
+}
+
+func (fb *pollerFeedbackReporterImpl) reportError(err error) {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.errorPollCount += 1
+	select {
+	case fb.ch <- struct{}{}:
+	default:
+	}
+}
+
+func (fb *pollerFeedbackReporterImpl) reportEmptyResponse() {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	fb.emptyPollCount += 1
+	select {
+	case fb.ch <- struct{}{}:
+	default:
+	}
+}
+
+func (fb *pollerFeedbackReporterImpl) reportPollLatency(d time.Duration) {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	if d < 200*time.Millisecond {
+		fb.syncPollCount += 1
+	} else {
+		fb.successfulPollCount += 1
+	}
+	select {
+	case fb.ch <- struct{}{}:
+	default:
+	}
+}
+
+// scaleDecision tells the worker if it should scale pollers up/down or keep the current scale.
+// worker may ignore this if scaling would violate some constraint like max pollers.
+// returns 1 to scale up, -1 to scale down, 0 to keep current scale.
+func (fb *pollerFeedbackReporterImpl) scaleDecision() int {
+	fb.mu.Lock()
+	defer fb.mu.Unlock()
+	defer func() {
+		fb.emptyPollCount = 0
+		fb.errorPollCount = 0
+		fb.syncPollCount = 0
+		fb.successfulPollCount = 0
+	}()
+	fb.logger.Info("Poller feedback", "emptyPollCount", fb.emptyPollCount, "errorPollCount", fb.errorPollCount, "syncPollCount", fb.syncPollCount, "successfulPollCount", fb.successfulPollCount)
+	totalPolls := fb.emptyPollCount + fb.errorPollCount + fb.syncPollCount + fb.successfulPollCount
+	if totalPolls == 0 {
+		return 0
+	}
+	if fb.emptyPollCount == totalPolls || fb.errorPollCount > 0 {
+		return -1
+	}
+	if fb.emptyPollCount > 0 {
+		return 0
+	}
+	if float64(fb.syncPollCount)/float64(fb.syncPollCount+fb.successfulPollCount) > 0.8 {
+		return 1
+	}
+	return 0
 }

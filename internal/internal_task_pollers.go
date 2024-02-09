@@ -68,6 +68,16 @@ type (
 		ProcessTask(interface{}) error
 	}
 
+	// pollerFeedbackReporter interface is for pollers to report feedback back to the worker.
+	pollerFeedbackReporter interface {
+		// Report the latency of a successful non empty poll operation.
+		reportPollLatency(time.Duration)
+		// Report an empty poll response.
+		reportEmptyResponse()
+		// Report an error received on polling.
+		reportError(error)
+	}
+
 	// basePoller is the base class for all poller implementations
 	basePoller struct {
 		metricsHandler metrics.Handler // base metric handler used for rpc calls
@@ -112,6 +122,8 @@ type (
 
 		numNormalPollerMetric *numPollerMetric
 		numStickyPollerMetric *numPollerMetric
+
+		reporter pollerFeedbackReporter
 	}
 
 	// activityTaskPoller implements polling/processing a workflow task
@@ -125,6 +137,7 @@ type (
 		logger              log.Logger
 		activitiesPerSecond float64
 		numPollerMetric     *numPollerMetric
+		reporter            pollerFeedbackReporter
 	}
 
 	historyIteratorImpl struct {
@@ -269,6 +282,7 @@ func newWorkflowTaskPoller(
 	taskHandler WorkflowTaskHandler,
 	contextManager WorkflowContextManager,
 	service workflowservice.WorkflowServiceClient,
+	reporter pollerFeedbackReporter,
 	params workerExecutionParameters,
 ) *workflowTaskPoller {
 	return &workflowTaskPoller{
@@ -294,6 +308,7 @@ func newWorkflowTaskPoller(
 		eagerActivityExecutor:        params.eagerActivityExecutor,
 		numNormalPollerMetric:        newNumPollerMetric(params.MetricsHandler, metrics.PollerTypeWorkflowTask),
 		numStickyPollerMetric:        newNumPollerMetric(params.MetricsHandler, metrics.PollerTypeWorkflowStickyTask),
+		reporter:                     reporter,
 	}
 }
 
@@ -766,18 +781,23 @@ func (wtp *workflowTaskPoller) poll(ctx context.Context) (interface{}, error) {
 	request := wtp.getNextPollRequest()
 	defer wtp.release(request.TaskQueue.GetKind())
 
+	t1 := time.Now()
 	response, err := wtp.pollWorkflowTaskQueue(ctx, request)
+	t2 := time.Now()
 	if err != nil {
+		wtp.reporter.reportError(err)
 		wtp.updateBacklog(request.TaskQueue.GetKind(), 0)
 		return nil, err
 	}
 
 	if response == nil || len(response.TaskToken) == 0 {
+		wtp.reporter.reportEmptyResponse()
 		// Emit using base scope as no workflow type information is available in the case of empty poll
 		wtp.metricsHandler.Counter(metrics.WorkflowTaskQueuePollEmptyCounter).Inc(1)
 		wtp.updateBacklog(request.TaskQueue.GetKind(), 0)
 		return &workflowTask{}, nil
 	}
+	wtp.reporter.reportPollLatency(t2.Sub(t1))
 
 	wtp.updateBacklog(request.TaskQueue.GetKind(), response.GetBacklogCountHint())
 
@@ -899,7 +919,7 @@ func newGetHistoryPageFunc(
 	}
 }
 
-func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowservice.WorkflowServiceClient, params workerExecutionParameters) *activityTaskPoller {
+func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowservice.WorkflowServiceClient, params workerExecutionParameters, feedbackReporter pollerFeedbackReporter) *activityTaskPoller {
 	return &activityTaskPoller{
 		basePoller: basePoller{
 			metricsHandler:       params.MetricsHandler,
@@ -916,6 +936,7 @@ func newActivityTaskPoller(taskHandler ActivityTaskHandler, service workflowserv
 		logger:              params.Logger,
 		activitiesPerSecond: params.TaskQueueActivitiesPerSecond,
 		numPollerMetric:     newNumPollerMetric(params.MetricsHandler, metrics.PollerTypeActivityTask),
+		reporter:            feedbackReporter,
 	}
 }
 
@@ -942,16 +963,20 @@ func (atp *activityTaskPoller) poll(ctx context.Context) (interface{}, error) {
 			UseVersioning: atp.useBuildIDVersioning,
 		},
 	}
-
+	t1 := time.Now()
 	response, err := atp.pollActivityTaskQueue(ctx, request)
+	t2 := time.Now()
 	if err != nil {
+		atp.reporter.reportError(err)
 		return nil, err
 	}
 	if response == nil || len(response.TaskToken) == 0 {
 		// No activity info is available on empty poll.  Emit using base scope.
+		atp.reporter.reportEmptyResponse()
 		atp.metricsHandler.Counter(metrics.ActivityPollNoTaskCounter).Inc(1)
 		return &activityTask{}, nil
 	}
+	atp.reporter.reportPollLatency(t2.Sub(t1))
 
 	workflowType := response.WorkflowType.GetName()
 	activityType := response.ActivityType.GetName()

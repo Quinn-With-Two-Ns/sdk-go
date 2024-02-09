@@ -160,16 +160,19 @@ type (
 
 	// baseWorkerOptions options to configure base worker.
 	baseWorkerOptions struct {
-		pollerCount       int
-		pollerRate        int
-		maxConcurrentTask int
-		maxTaskPerSecond  float64
-		taskWorker        taskPoller
-		identity          string
-		workerType        string
-		stopTimeout       time.Duration
-		fatalErrCb        func(error)
-		userContextCancel context.CancelFunc
+		maxPollerCount     int
+		minPollerCount     int
+		initialPollerCount int
+		enablePollerTuning bool
+		pollerRate         int
+		maxConcurrentTask  int
+		maxTaskPerSecond   float64
+		taskWorker         taskPoller
+		identity           string
+		workerType         string
+		stopTimeout        time.Duration
+		fatalErrCb         func(error)
+		userContextCancel  context.CancelFunc
 	}
 
 	// baseWorker that wraps worker activities.
@@ -177,6 +180,8 @@ type (
 		options              baseWorkerOptions
 		isWorkerStarted      bool
 		stopCh               chan struct{}  // Channel used to stop the go routines.
+		pollerStopCh         chan struct{}  // Channel used to stop a poller go routines.
+		pollerScaleCh        chan struct{}  // Channel used to scale poller go routines.
 		stopWG               sync.WaitGroup // The WaitGroup for stopping existing routines.
 		pollLimiter          *rate.Limiter
 		taskLimiter          *rate.Limiter
@@ -199,6 +204,7 @@ type (
 		lastPollTaskErrMessage string
 		lastPollTaskErrStarted time.Time
 		lastPollTaskErrLock    sync.Mutex
+		feedback               *pollerFeedbackReporterImpl
 	}
 
 	polledTask struct {
@@ -248,11 +254,15 @@ func newBaseWorker(
 	logger log.Logger,
 	metricsHandler metrics.Handler,
 	sessionTokenBucket *sessionTokenBucket,
+	feedback *pollerFeedbackReporterImpl,
 ) *baseWorker {
 	ctx, cancel := context.WithCancel(context.Background())
 	bw := &baseWorker{
-		options:            options,
-		stopCh:             make(chan struct{}),
+		options: options,
+		stopCh:  make(chan struct{}),
+		// TODO(quinn) use a buffered channel?
+		pollerStopCh:       make(chan struct{}),
+		pollerScaleCh:      make(chan struct{}),
 		taskLimiter:        rate.NewLimiter(rate.Limit(options.maxTaskPerSecond), 1),
 		retrier:            backoff.NewConcurrentRetrier(pollOperationRetryPolicy),
 		logger:             log.With(logger, tagWorkerType, options.workerType),
@@ -266,6 +276,7 @@ func newBaseWorker(
 		limiterContext:       ctx,
 		limiterContextCancel: cancel,
 		sessionTokenBucket:   sessionTokenBucket,
+		feedback:             feedback,
 	}
 	// Set secondary retrier as resource exhausted
 	bw.retrier.SetSecondaryRetryPolicy(pollResourceExhaustedRetryPolicy)
@@ -286,10 +297,18 @@ func (bw *baseWorker) Start() {
 
 	bw.metricsHandler.Counter(metrics.WorkerStartCounter).Inc(1)
 
-	for i := 0; i < bw.options.pollerCount; i++ {
+	for i := 0; i < bw.options.initialPollerCount; i++ {
 		bw.stopWG.Add(1)
 		go bw.runPoller()
 	}
+
+	if bw.options.enablePollerTuning {
+		bw.stopWG.Add(1)
+		go bw.runPollerAutoScaler()
+	}
+
+	bw.stopWG.Add(1)
+	go bw.runPollerScaler()
 
 	bw.stopWG.Add(1)
 	go bw.runTaskDispatcher()
@@ -300,7 +319,9 @@ func (bw *baseWorker) Start() {
 	bw.isWorkerStarted = true
 	traceLog(func() {
 		bw.logger.Info("Started Worker",
-			"PollerCount", bw.options.pollerCount,
+			"MinPollerCount", bw.options.minPollerCount,
+			"InitialPollerCount", bw.options.initialPollerCount,
+			"MaxPollerCount", bw.options.maxPollerCount,
 			"MaxConcurrentTask", bw.options.maxConcurrentTask,
 			"MaxTaskPerSecond", bw.options.maxTaskPerSecond,
 		)
@@ -323,6 +344,8 @@ func (bw *baseWorker) runPoller() {
 	for {
 		select {
 		case <-bw.stopCh:
+			return
+		case <-bw.pollerStopCh:
 			return
 		case <-bw.pollerRequestCh:
 			if bw.sessionTokenBucket != nil {
@@ -366,6 +389,64 @@ func (bw *baseWorker) processTaskAsync(task interface{}, callback func()) {
 		}
 		bw.processTask(task)
 	}()
+}
+
+func (bw *baseWorker) runPollerAutoScaler() {
+	defer bw.stopWG.Done()
+	pollerCount := bw.options.initialPollerCount
+	bw.logger.Info("Started poller auto scaler", "MinPollerCount", bw.options.minPollerCount, "InitialPollerCount", pollerCount, "MaxPollerCount", bw.options.maxPollerCount)
+	for {
+		select {
+		case <-bw.feedback.ch:
+			scaleDesc := bw.feedback.scaleDecision()
+			bw.logger.Info("Poller scaler received feedback.", "Scale Decision", scaleDesc, "Poller Count", pollerCount)
+			// Scale up if we have a positive delta and we have not reached max poller count
+			// don't scale if we are out of slots since the poller will not be able to do anything
+			if scaleDesc > 0 && pollerCount < bw.options.maxPollerCount && len(bw.pollerRequestCh) > 0 {
+				pollerCount += 1
+				select {
+				case bw.pollerScaleCh <- struct{}{}:
+				case <-bw.stopCh:
+					return
+				}
+
+			} else if scaleDesc < 0 && pollerCount > bw.options.minPollerCount {
+				pollerCount -= 1
+				select {
+				// This can block for up to long poll timeout
+				case bw.pollerStopCh <- struct{}{}:
+				case <-bw.stopCh:
+					return
+				}
+			}
+			bw.logger.Info("Poller scaler acted.", "New Poller Count", pollerCount)
+			timer := time.NewTimer(10 * time.Second)
+			select {
+			case <-timer.C:
+				timer.Stop()
+				continue
+			case <-bw.stopCh:
+				timer.Stop()
+				return
+			}
+		case <-bw.stopCh:
+			return
+		}
+	}
+}
+
+func (bw *baseWorker) runPollerScaler() {
+	defer bw.stopWG.Done()
+
+	for {
+		select {
+		case <-bw.pollerScaleCh:
+			bw.stopWG.Add(1)
+			go bw.runPoller()
+		case <-bw.stopCh:
+			return
+		}
+	}
 }
 
 func (bw *baseWorker) runTaskDispatcher() {

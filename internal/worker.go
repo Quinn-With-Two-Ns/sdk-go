@@ -30,6 +30,16 @@ import (
 )
 
 type (
+	// PollerTuningOptions is used to configure the poller tuning options.
+	PollerTuningOptions struct {
+		// MinimumConcurrentTaskQueuePollers is the minimum number of pollers that will be running at any given time.
+		MinimumConcurrentTaskQueuePollers int
+		// InitialConcurrentTaskQueuePollers is the initial number of pollers that will be running at any given time.
+		InitialConcurrentTaskQueuePollers int
+		// MaximumConcurrentTaskQueuePollers is the maximum number of pollers that will be running at any given time.
+		MaxConcurrentTaskQueuePollers int
+	}
+
 	// WorkerOptions is used to configure a worker instance.
 	// The current timeout resolution implementation is in seconds and uses math.Ceil(d.Seconds()) as the duration. But is
 	// subjected to change in the future.
@@ -240,6 +250,18 @@ type (
 		// NOTE: Experimental
 		// Note: Cannot be enabled at the same time as EnableSessionWorker
 		UseBuildIDForVersioning bool
+
+		// WorkerPollerTuningOptions: If set, the worker will tune its poller settings based on
+		// feedback on polled responses with these options.
+		// NOTE: Experimental
+		// NOTE: If set, the worker will ignore MaxConcurrentWorkflowTaskPollers.
+		WorkflowPollerTuningOptions *PollerTuningOptions
+
+		// WorkerPollerTuningOptions: If set, the worker will tune its poller settings based on
+		// feedback on polled responses with these options.
+		// NOTE: Experimental
+		// NOTE: If set, the worker will ignore MaxConcurrentActivityTaskPollers.
+		ActivityPollerTuningOptions *PollerTuningOptions
 	}
 )
 
