@@ -215,6 +215,10 @@ type (
 
 		MaxHeartbeatThrottleInterval time.Duration
 
+		WorkflowSlotSupplier SlotSupplier
+
+		ActivitySlotSupplier SlotSupplier
+
 		// Pointer to the shared worker cache
 		cache *WorkerCache
 
@@ -323,6 +327,7 @@ func newWorkflowTaskWorkerInternal(
 		params.Logger,
 		params.MetricsHandler,
 		nil,
+		params.WorkflowSlotSupplier,
 	)
 
 	// laTunnel is the glue that hookup 3 parts
@@ -347,6 +352,7 @@ func newWorkflowTaskWorkerInternal(
 	},
 		params.Logger,
 		params.MetricsHandler,
+		nil,
 		nil,
 	)
 
@@ -466,6 +472,7 @@ func newActivityTaskWorker(taskHandler ActivityTaskHandler, service workflowserv
 		workerParams.Logger,
 		workerParams.MetricsHandler,
 		sessionTokenBucket,
+		workerParams.ActivitySlotSupplier,
 	)
 
 	return &activityWorker{
@@ -1590,6 +1597,8 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 		DeadlockDetectionTimeout:              options.DeadlockDetectionTimeout,
 		DefaultHeartbeatThrottleInterval:      options.DefaultHeartbeatThrottleInterval,
 		MaxHeartbeatThrottleInterval:          options.MaxHeartbeatThrottleInterval,
+		WorkflowSlotSupplier:                  options.WorkflowSlotSupplier,
+		ActivitySlotSupplier:                  options.ActivitySlotSupplier,
 		cache:                                 cache,
 		eagerActivityExecutor: newEagerActivityExecutor(eagerActivityExecutorOptions{
 			disabled:      options.DisableEagerActivities,

@@ -30,6 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -60,6 +61,7 @@ var (
 	pollResourceExhaustedRetryPolicy              = createPollResourceExhaustedRetryPolicy()
 	retryLongPollGracePeriod                      = 2 * time.Minute
 	_                                SlotSupplier = (*semaphoreSlotSupplier)(nil)
+	_                                SlotSupplier = (*memoryBoundSlotSupplier)(nil)
 )
 
 var errStop = errors.New("worker stopping")
@@ -235,9 +237,77 @@ type (
 		taskSlotsAvailable      int32
 		taskSlotsAvailableGauge metrics.Gauge
 	}
+
+	memoryBoundSlotSupplier struct {
+		memoryUsageLimitBytes int
+		taskSlots             atomic.Int32
+		taskSlotsInUse        atomic.Int32
+	}
 )
 
-func newSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) *semaphoreSlotSupplier {
+func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int) *memoryBoundSlotSupplier {
+	return &memoryBoundSlotSupplier{
+		memoryUsageLimitBytes: memoryUsageLimitBytes,
+	}
+}
+
+// MarkSlotInUse implements SlotSupplier.
+func (ms *memoryBoundSlotSupplier) MarkSlotInUse() {
+	ms.taskSlotsInUse.Add(1)
+}
+
+// MarkSlotNotInUse implements SlotSupplier.
+func (ms *memoryBoundSlotSupplier) MarkSlotNotInUse() {
+	defer ms.taskSlotsInUse.Add(-1)
+}
+
+// ReleaseSlot implements SlotSupplier.
+func (ms *memoryBoundSlotSupplier) ReleaseSlot(err error) {
+	ms.taskSlots.Add(-1)
+}
+
+func bToMb(b uint64) uint64 {
+	return b / 1024 / 1024
+}
+
+// ReserveSlot implements SlotSupplier.
+func (ms *memoryBoundSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
+	freeMemory := func() bool {
+		var m runtime.MemStats
+		runtime.ReadMemStats(&m)
+		inUseMem := m.StackInuse + m.HeapInuse + m.MSpanInuse + m.MCacheInuse
+		projectedMemoryUsage := float64(inUseMem)
+		fmt.Printf("Projected Memory Usage: %d Mb\n", bToMb(inUseMem))
+		fmt.Printf("Allow new slot: %t\n", projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8)
+		return projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8
+	}
+	if freeMemory() {
+		ms.taskSlots.Add(1)
+		return true
+	}
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if freeMemory() {
+				ms.taskSlots.Add(1)
+				return true
+			}
+		case <-stopCh:
+			return false
+		}
+	}
+}
+
+// TryReserveSlot implements SlotSupplier.
+func (ms *memoryBoundSlotSupplier) TryReserveSlot() bool {
+	// TODO: This should go through the same memory check as ReserveSlot
+	ms.taskSlots.Add(1)
+	return true
+}
+
+func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) *semaphoreSlotSupplier {
 	s := &semaphoreSlotSupplier{
 		slots:                   make(chan struct{}, maxSlots),
 		taskSlotsAvailable:      int32(maxSlots),
@@ -319,9 +389,13 @@ func newBaseWorker(
 	logger log.Logger,
 	metricsHandler metrics.Handler,
 	sessionTokenBucket *sessionTokenBucket,
+	slotSupplier SlotSupplier,
 ) *baseWorker {
-	ctx, cancel := context.WithCancel(context.Background())
 	mh := metricsHandler.WithTags(metrics.WorkerTags(options.workerType))
+	if slotSupplier == nil {
+		slotSupplier = NewSemaphoreSlotSupplier(options.maxConcurrentTask, metricsHandler.Gauge(metrics.WorkerTaskSlotsAvailable))
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	bw := &baseWorker{
 		options:          options,
 		stopCh:           make(chan struct{}),
@@ -329,7 +403,7 @@ func newBaseWorker(
 		retrier:          backoff.NewConcurrentRetrier(pollOperationRetryPolicy),
 		logger:           log.With(logger, tagWorkerType, options.workerType),
 		metricsHandler:   mh,
-		slotSupplier:     newSemaphoreSlotSupplier(options.maxConcurrentTask, mh.Gauge(metrics.WorkerTaskSlotsAvailable)),
+		slotSupplier:     slotSupplier,
 		taskQueueCh:      make(chan interface{}),                          // no buffer, so poller only able to poll new task after previous is dispatched.
 		eagerTaskQueueCh: make(chan eagerTask, options.maxConcurrentTask), // allow enough capacity so that eager dispatch will not block
 		fatalErrCb:       options.fatalErrCb,

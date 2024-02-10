@@ -34,6 +34,7 @@ import (
 	"go.temporal.io/sdk/activity"
 	"go.temporal.io/sdk/client"
 	"go.temporal.io/sdk/internal"
+	"go.temporal.io/sdk/internal/common/metrics"
 	"go.temporal.io/sdk/log"
 	"go.temporal.io/sdk/workflow"
 )
@@ -216,6 +217,9 @@ type (
 
 	// ReplayWorkflowHistoryOptions are options for replaying a workflow.
 	ReplayWorkflowHistoryOptions = internal.ReplayWorkflowHistoryOptions
+
+	// SlotSupplier is used to reserve and release task slots
+	SlotSupplier = internal.SlotSupplier
 )
 
 const (
@@ -294,4 +298,14 @@ func SetBinaryChecksum(checksum string) {
 // InterruptCh returns channel which will get data when system receives interrupt signal from OS. Pass it to worker.Run() func to stop worker with Ctrl+C.
 func InterruptCh() <-chan interface{} {
 	return internal.InterruptCh()
+}
+
+// NewSemaphoreSlotSupplier creates a new SemaphoreSlotSupplier
+func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) SlotSupplier {
+	return internal.NewSemaphoreSlotSupplier(maxSlots, taskSlotsAvailableGauge)
+}
+
+// NewMemoryBoundSlotSupplier creates a new MemoryBoundSlotSupplier
+func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int) SlotSupplier {
+	return internal.NewMemoryBoundSlotSupplier(memoryUsageLimitBytes)
 }

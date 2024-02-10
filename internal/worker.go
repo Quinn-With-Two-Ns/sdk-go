@@ -244,6 +244,14 @@ type (
 		// NOTE: Experimental
 		// Note: Cannot be enabled at the same time as EnableSessionWorker
 		UseBuildIDForVersioning bool
+
+		// WorkflowSlotSupplier is used to supply task slots to the workflow worker.
+		// NOTE: Experimental
+		WorkflowSlotSupplier SlotSupplier
+
+		// ActivitySlotSupplier is used to supply task slots to the activity worker.
+		// NOTE: Experimental
+		ActivitySlotSupplier SlotSupplier
 	}
 )
 
