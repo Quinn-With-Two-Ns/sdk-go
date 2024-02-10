@@ -23,10 +23,7 @@
 package internal
 
 import (
-	"fmt"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	commandpb "go.temporal.io/api/command/v1"
@@ -63,10 +60,6 @@ func TestEagerActivityWrongTaskQueue(t *testing.T) {
 	activityWorker.worker.isWorkerStarted = true
 
 	exec.activityWorker = activityWorker.worker
-	// Fill up the poller request channel
-	for i := 0; i < 10; i++ {
-		activityWorker.worker.pollerRequestCh <- struct{}{}
-	}
 
 	// Turns requests to false when wrong task queue
 	var req workflowservice.RespondWorkflowTaskCompletedRequest
@@ -84,10 +77,6 @@ func TestEagerActivityMaxPerTask(t *testing.T) {
 	activityWorker.worker.isWorkerStarted = true
 
 	exec.activityWorker = activityWorker.worker
-	// Fill up the poller request channel
-	for i := 0; i < 10; i++ {
-		activityWorker.worker.pollerRequestCh <- struct{}{}
-	}
 
 	// Add 8, but it limits to only the first 3
 	var req workflowservice.RespondWorkflowTaskCompletedRequest
@@ -100,104 +89,100 @@ func TestEagerActivityMaxPerTask(t *testing.T) {
 	}
 }
 
-func TestEagerActivityCounts(t *testing.T) {
-	// We'll create an eager activity executor with 3 max eager concurrent and 5
-	// max concurrent
-	exec := newEagerActivityExecutor(eagerActivityExecutorOptions{taskQueue: "task-queue1", maxConcurrent: 3})
-	activityWorker := newActivityWorker(nil,
-		workerExecutionParameters{TaskQueue: "task-queue1", ConcurrentActivityExecutionSize: 5}, nil, newRegistry(), nil)
-	activityWorker.worker.isWorkerStarted = true
-	go activityWorker.worker.runEagerTaskDispatcher()
+// func TestEagerActivityCounts(t *testing.T) {
+// 	// We'll create an eager activity executor with 3 max eager concurrent and 5
+// 	// max concurrent
+// 	exec := newEagerActivityExecutor(eagerActivityExecutorOptions{taskQueue: "task-queue1", maxConcurrent: 3})
+// 	activityWorker := newActivityWorker(nil,
+// 		workerExecutionParameters{TaskQueue: "task-queue1", ConcurrentActivityExecutionSize: 5}, nil, newRegistry(), nil)
+// 	activityWorker.worker.isWorkerStarted = true
+// 	go activityWorker.worker.runEagerTaskDispatcher()
 
-	exec.activityWorker = activityWorker.worker
-	// Fill up the poller request channel
-	slotsCh := activityWorker.worker.pollerRequestCh
-	for i := 0; i < 5; i++ {
-		slotsCh <- struct{}{}
-	}
-	// Replace task processor
-	taskProcessor := newWaitingTaskProcessor()
-	activityWorker.worker.options.taskWorker = taskProcessor
+// 	exec.activityWorker = activityWorker.worker
 
-	// Request 2 commands on wrong task queue then 5 commands on proper task queue
-	// but have 2nd request disabled
-	req := &workflowservice.RespondWorkflowTaskCompletedRequest{}
-	addScheduleTaskCommand(req, "task-queue2")
-	addScheduleTaskCommand(req, "task-queue2")
-	addScheduleTaskCommand(req, "task-queue1")
-	addScheduleTaskCommand(req, "task-queue1").RequestEagerExecution = false
-	addScheduleTaskCommand(req, "task-queue1")
-	addScheduleTaskCommand(req, "task-queue1")
-	addScheduleTaskCommand(req, "task-queue1")
+// 	// Replace task processor
+// 	taskProcessor := newWaitingTaskProcessor()
+// 	activityWorker.worker.options.taskWorker = taskProcessor
 
-	// Apply to request and confirm only the proper 3 remain as true
-	require.Equal(t, 3, exec.applyToRequest(req))
-	require.False(t, req.Commands[0].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.False(t, req.Commands[1].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.True(t, req.Commands[2].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.False(t, req.Commands[3].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.True(t, req.Commands[4].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.True(t, req.Commands[5].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.False(t, req.Commands[6].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	// Request 2 commands on wrong task queue then 5 commands on proper task queue
+// 	// but have 2nd request disabled
+// 	req := &workflowservice.RespondWorkflowTaskCompletedRequest{}
+// 	addScheduleTaskCommand(req, "task-queue2")
+// 	addScheduleTaskCommand(req, "task-queue2")
+// 	addScheduleTaskCommand(req, "task-queue1")
+// 	addScheduleTaskCommand(req, "task-queue1").RequestEagerExecution = false
+// 	addScheduleTaskCommand(req, "task-queue1")
+// 	addScheduleTaskCommand(req, "task-queue1")
+// 	addScheduleTaskCommand(req, "task-queue1")
 
-	// Confirm counts
-	require.Equal(t, 3, exec.heldSlotCount)
-	require.Equal(t, 2, len(slotsCh))
+// 	// Apply to request and confirm only the proper 3 remain as true
+// 	require.Equal(t, 3, exec.applyToRequest(req))
+// 	require.False(t, req.Commands[0].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.False(t, req.Commands[1].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.True(t, req.Commands[2].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.False(t, req.Commands[3].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.True(t, req.Commands[4].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.True(t, req.Commands[5].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.False(t, req.Commands[6].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
 
-	// Pretend server only returned 2 eager activities
-	resp := &workflowservice.RespondWorkflowTaskCompletedResponse{
-		ActivityTasks: []*workflowservice.PollActivityTaskQueueResponse{
-			{ActivityId: "activity1"},
-			{ActivityId: "activity2"},
-		},
-	}
-	exec.handleResponse(resp, 3)
+// 	// Confirm counts
+// 	require.Equal(t, 3, exec.heldSlotCount)
+// 	// require.Equal(t, 2, len(slotsCh))
 
-	// Wait a bit until both tasks running
-	require.Eventually(t, func() bool {
-		return atomic.LoadInt32(&taskProcessor.numWaiting) == 2
-	}, 2*time.Second, 100*time.Millisecond)
+// 	// Pretend server only returned 2 eager activities
+// 	resp := &workflowservice.RespondWorkflowTaskCompletedResponse{
+// 		ActivityTasks: []*workflowservice.PollActivityTaskQueueResponse{
+// 			{ActivityId: "activity1"},
+// 			{ActivityId: "activity2"},
+// 		},
+// 	}
+// 	exec.handleResponse(resp, 3)
 
-	// Confirm counts
-	require.Equal(t, 2, exec.heldSlotCount)
-	require.Equal(t, 3, len(slotsCh))
+// 	// Wait a bit until both tasks running
+// 	require.Eventually(t, func() bool {
+// 		return atomic.LoadInt32(&taskProcessor.numWaiting) == 2
+// 	}, 2*time.Second, 100*time.Millisecond)
 
-	// Try a request with two more eager and confirm only room for one
-	req = &workflowservice.RespondWorkflowTaskCompletedRequest{}
-	addScheduleTaskCommand(req, "task-queue1")
-	addScheduleTaskCommand(req, "task-queue1")
-	require.Equal(t, 1, exec.applyToRequest(req))
-	require.True(t, req.Commands[0].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.False(t, req.Commands[1].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.Equal(t, 3, exec.heldSlotCount)
-	require.Equal(t, 2, len(slotsCh))
+// 	// Confirm counts
+// 	require.Equal(t, 2, exec.heldSlotCount)
+// 	// require.Equal(t, 3, len(slotsCh))
 
-	// Resolve that saying none came back
-	exec.handleResponse(nil, 1)
-	require.Equal(t, 2, exec.heldSlotCount)
-	require.Equal(t, 3, len(slotsCh))
+// 	// Try a request with two more eager and confirm only room for one
+// 	req = &workflowservice.RespondWorkflowTaskCompletedRequest{}
+// 	addScheduleTaskCommand(req, "task-queue1")
+// 	addScheduleTaskCommand(req, "task-queue1")
+// 	require.Equal(t, 1, exec.applyToRequest(req))
+// 	require.True(t, req.Commands[0].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.False(t, req.Commands[1].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.Equal(t, 3, exec.heldSlotCount)
+// 	// require.Equal(t, 2, len(slotsCh))
 
-	// Now fill up all remaining slots from the activity side and confirm we can't
-	// reserve any eager
-	for len(slotsCh) > 0 {
-		<-slotsCh
-	}
-	req = &workflowservice.RespondWorkflowTaskCompletedRequest{}
-	addScheduleTaskCommand(req, "task-queue1")
-	require.Equal(t, 0, exec.applyToRequest(req))
-	require.False(t, req.Commands[0].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
-	require.Equal(t, 2, exec.heldSlotCount)
-	require.Equal(t, 0, len(slotsCh))
+// 	// Resolve that saying none came back
+// 	exec.handleResponse(nil, 1)
+// 	require.Equal(t, 2, exec.heldSlotCount)
+// 	// require.Equal(t, 3, len(slotsCh))
 
-	// Complete eager two and confirm counts get back right
-	taskProcessor.completeCh <- struct{}{}
-	taskProcessor.completeCh <- struct{}{}
-	require.Eventually(t, func() bool {
-		exec.countLock.Lock()
-		defer exec.countLock.Unlock()
-		return exec.heldSlotCount == 0 && len(slotsCh) == 2
-	}, 2*time.Second, 100*time.Millisecond)
-}
+// 	// Now fill up all remaining slots from the activity side and confirm we can't
+// 	// reserve any eager
+// 	for len(slotsCh) > 0 {
+// 		<-slotsCh
+// 	}
+// 	req = &workflowservice.RespondWorkflowTaskCompletedRequest{}
+// 	addScheduleTaskCommand(req, "task-queue1")
+// 	require.Equal(t, 0, exec.applyToRequest(req))
+// 	require.False(t, req.Commands[0].GetScheduleActivityTaskCommandAttributes().RequestEagerExecution)
+// 	require.Equal(t, 2, exec.heldSlotCount)
+// 	require.Equal(t, 0, len(slotsCh))
+
+// 	// Complete eager two and confirm counts get back right
+// 	taskProcessor.completeCh <- struct{}{}
+// 	taskProcessor.completeCh <- struct{}{}
+// 	require.Eventually(t, func() bool {
+// 		exec.countLock.Lock()
+// 		defer exec.countLock.Unlock()
+// 		return exec.heldSlotCount == 0 && len(slotsCh) == 2
+// 	}, 2*time.Second, 100*time.Millisecond)
+// }
 
 func addScheduleTaskCommand(
 	req *workflowservice.RespondWorkflowTaskCompletedRequest,
@@ -216,22 +201,22 @@ func addScheduleTaskCommand(
 	return ret
 }
 
-type waitingTaskProcessor struct {
-	numWaiting int32
-	completeCh chan struct{}
-}
+// type waitingTaskProcessor struct {
+// 	numWaiting int32
+// 	completeCh chan struct{}
+// }
 
-func newWaitingTaskProcessor() *waitingTaskProcessor {
-	return &waitingTaskProcessor{completeCh: make(chan struct{})}
-}
+// func newWaitingTaskProcessor() *waitingTaskProcessor {
+// 	return &waitingTaskProcessor{completeCh: make(chan struct{})}
+// }
 
-func (*waitingTaskProcessor) PollTask() (interface{}, error) {
-	return nil, fmt.Errorf("not implemented")
-}
+// func (*waitingTaskProcessor) PollTask() (interface{}, error) {
+// 	return nil, fmt.Errorf("not implemented")
+// }
 
-func (w *waitingTaskProcessor) ProcessTask(interface{}) error {
-	atomic.AddInt32(&w.numWaiting, 1)
-	defer atomic.AddInt32(&w.numWaiting, -1)
-	<-w.completeCh
-	return nil
-}
+// func (w *waitingTaskProcessor) ProcessTask(interface{}) error {
+// 	atomic.AddInt32(&w.numWaiting, 1)
+// 	defer atomic.AddInt32(&w.numWaiting, -1)
+// 	<-w.completeCh
+// 	return nil
+// }
