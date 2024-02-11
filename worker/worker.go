@@ -220,6 +220,9 @@ type (
 
 	// SlotSupplier is used to reserve and release task slots
 	SlotSupplier = internal.SlotSupplier
+
+	// PauseableSlotSupplier is a SlotSupplier that can be paused and unpaused
+	PauseableSlotSupplier = internal.PauseableSlotSupplier
 )
 
 const (
@@ -308,4 +311,9 @@ func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gaug
 // NewMemoryBoundSlotSupplier creates a new MemoryBoundSlotSupplier
 func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int) SlotSupplier {
 	return internal.NewMemoryBoundSlotSupplier(memoryUsageLimitBytes)
+}
+
+// NewPauseableSlotSupplier creates a new PauseableSlotSupplier
+func NewPauseableSlotSupplier(slotSupplier SlotSupplier) PauseableSlotSupplier {
+	return internal.NewPauseableSlotSupplier(slotSupplier)
 }

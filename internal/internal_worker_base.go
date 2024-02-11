@@ -62,6 +62,7 @@ var (
 	retryLongPollGracePeriod                      = 2 * time.Minute
 	_                                SlotSupplier = (*semaphoreSlotSupplier)(nil)
 	_                                SlotSupplier = (*memoryBoundSlotSupplier)(nil)
+	_                                SlotSupplier = (*pauseableSlotSupplier)(nil)
 )
 
 var errStop = errors.New("worker stopping")
@@ -84,6 +85,15 @@ type (
 		// ReleaseSlot release a task slot acquired by the supplier
 		// TODO: May be useful to supply info if processing the task failed.
 		ReleaseSlot(err error)
+	}
+
+	// PauseableSlotSupplier is a SlotSupplier that can be paused and unpaused
+	PauseableSlotSupplier interface {
+		SlotSupplier
+		// Pause pauses the slot supplier so no new slots can be reserved
+		Pause()
+		// Unpause unpauses the slot supplier so new slots can be reserved
+		Unpause()
 	}
 
 	// ResultHandler that returns result
@@ -243,7 +253,102 @@ type (
 		taskSlots             atomic.Int32
 		taskSlotsInUse        atomic.Int32
 	}
+
+	pauseableSlotSupplier struct {
+		// TODO track the number of slots in use to tell how "paused" we are
+		slotSupplier SlotSupplier
+		mutex        sync.Mutex
+		paused       bool
+		pauseWaitCh  chan struct{}
+	}
 )
+
+// MarkSlotInUse implements SlotSupplier.
+func (ps *pauseableSlotSupplier) MarkSlotInUse() {
+	ps.slotSupplier.MarkSlotInUse()
+}
+
+// MarkSlotNotInUse implements SlotSupplier.
+func (ps *pauseableSlotSupplier) MarkSlotNotInUse() {
+	ps.slotSupplier.MarkSlotNotInUse()
+}
+
+// ReleaseSlot implements SlotSupplier.
+func (ps *pauseableSlotSupplier) ReleaseSlot(err error) {
+	ps.slotSupplier.ReleaseSlot(err)
+}
+
+// ReserveSlot implements SlotSupplier.
+func (ps *pauseableSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
+	ps.mutex.Lock()
+	if ps.paused {
+		ch := ps.pauseWaitCh
+		ps.mutex.Unlock()
+		select {
+		case <-stopCh:
+			return false
+		case <-ch:
+		}
+	} else {
+		ps.mutex.Unlock()
+	}
+	slot := ps.slotSupplier.ReserveSlot(stopCh)
+	if !slot {
+		return false
+	}
+	// If we are paused, we need to release the slot we just acquired
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+	if ps.paused {
+		ps.slotSupplier.ReleaseSlot(nil)
+		return false
+	}
+	return slot
+}
+
+// TryReserveSlot implements SlotSupplier.
+func (ps *pauseableSlotSupplier) TryReserveSlot() bool {
+	if func() bool {
+		ps.mutex.Lock()
+		defer ps.mutex.Unlock()
+		return ps.paused
+	}() {
+		return false
+	}
+
+	return ps.slotSupplier.TryReserveSlot()
+}
+
+func (ps *pauseableSlotSupplier) Pause() {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	if ps.paused {
+		return
+	}
+
+	ps.paused = true
+}
+
+func (ps *pauseableSlotSupplier) Unpause() {
+	ps.mutex.Lock()
+	defer ps.mutex.Unlock()
+
+	if !ps.paused {
+		return
+	}
+	close(ps.pauseWaitCh)
+	ps.pauseWaitCh = make(chan struct{})
+	ps.paused = false
+
+}
+
+func NewPauseableSlotSupplier(slotSupplier SlotSupplier) *pauseableSlotSupplier {
+	return &pauseableSlotSupplier{
+		slotSupplier: slotSupplier,
+		pauseWaitCh:  make(chan struct{}),
+	}
+}
 
 func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int) *memoryBoundSlotSupplier {
 	return &memoryBoundSlotSupplier{
