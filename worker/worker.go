@@ -309,8 +309,8 @@ func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gaug
 }
 
 // NewMemoryBoundSlotSupplier creates a new MemoryBoundSlotSupplier
-func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int) SlotSupplier {
-	return internal.NewMemoryBoundSlotSupplier(memoryUsageLimitBytes)
+func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int, taskSlotsInUseGauge metrics.Gauge) SlotSupplier {
+	return internal.NewMemoryBoundSlotSupplier(memoryUsageLimitBytes, taskSlotsInUseGauge)
 }
 
 // NewPauseableSlotSupplier creates a new PauseableSlotSupplier

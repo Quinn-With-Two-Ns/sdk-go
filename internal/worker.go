@@ -246,12 +246,19 @@ type (
 		UseBuildIDForVersioning bool
 
 		// WorkflowSlotSupplier is used to supply task slots to the workflow worker.
+		// If not set, MaxConcurrentWorkflowTaskExecutionSize will be used to determine the number of slots.
 		// NOTE: Experimental
 		WorkflowSlotSupplier SlotSupplier
 
 		// ActivitySlotSupplier is used to supply task slots to the activity worker.
+		// If not set, MaxConcurrentActivityTaskExecutionSize will be used to determine the number of slots.
 		// NOTE: Experimental
 		ActivitySlotSupplier SlotSupplier
+
+		// LocalActivitySlotSupplier is used to supply task slots to the local activity worker.
+		// If not set, MaxConcurrentLocalActivityExecutionSize will be used to determine the number of slots.
+		// NOTE: Experimental
+		LocalActivitySlotSupplier SlotSupplier
 	}
 )
 

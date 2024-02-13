@@ -57,12 +57,12 @@ const (
 )
 
 var (
-	pollOperationRetryPolicy                      = createPollRetryPolicy()
-	pollResourceExhaustedRetryPolicy              = createPollResourceExhaustedRetryPolicy()
-	retryLongPollGracePeriod                      = 2 * time.Minute
-	_                                SlotSupplier = (*semaphoreSlotSupplier)(nil)
-	_                                SlotSupplier = (*memoryBoundSlotSupplier)(nil)
-	_                                SlotSupplier = (*pauseableSlotSupplier)(nil)
+	pollOperationRetryPolicy                               = createPollRetryPolicy()
+	pollResourceExhaustedRetryPolicy                       = createPollResourceExhaustedRetryPolicy()
+	retryLongPollGracePeriod                               = 2 * time.Minute
+	_                                SlotSupplier          = (*semaphoreSlotSupplier)(nil)
+	_                                SlotSupplier          = (*memoryBoundSlotSupplier)(nil)
+	_                                PauseableSlotSupplier = (*pauseableSlotSupplier)(nil)
 )
 
 var errStop = errors.New("worker stopping")
@@ -71,7 +71,7 @@ type (
 	// SlotSupplier is used to reserve and release task slots
 	SlotSupplier interface {
 		// ReserveSlot tries to reserver a task slot on the worker, blocks until a slot is available or stopCh is closed.
-		// Returns false if stopCh is closed.
+		// Returns false if no slot is reserved.
 		ReserveSlot(stopCh chan struct{}) bool
 		// TryReserveSlot tries to reserver a task slot on the worker without blocking
 		TryReserveSlot() bool
@@ -244,7 +244,7 @@ type (
 	semaphoreSlotSupplier struct {
 		slots chan struct{}
 		// Must be atomically accessed
-		taskSlotsAvailable      int32
+		taskSlotsAvailable      atomic.Int32
 		taskSlotsAvailableGauge metrics.Gauge
 	}
 
@@ -252,6 +252,7 @@ type (
 		memoryUsageLimitBytes int
 		taskSlots             atomic.Int32
 		taskSlotsInUse        atomic.Int32
+		taskSlotsInUseGauge   metrics.Gauge
 	}
 
 	pauseableSlotSupplier struct {
@@ -315,7 +316,7 @@ func (ps *pauseableSlotSupplier) TryReserveSlot() bool {
 	}() {
 		return false
 	}
-
+	// TryReserveSlot should not block so we don't need to check again after acquiring the slot
 	return ps.slotSupplier.TryReserveSlot()
 }
 
@@ -350,20 +351,21 @@ func NewPauseableSlotSupplier(slotSupplier SlotSupplier) *pauseableSlotSupplier 
 	}
 }
 
-func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int) *memoryBoundSlotSupplier {
+func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int, taskSlotsInUseGauge metrics.Gauge) *memoryBoundSlotSupplier {
 	return &memoryBoundSlotSupplier{
 		memoryUsageLimitBytes: memoryUsageLimitBytes,
+		taskSlotsInUseGauge:   taskSlotsInUseGauge,
 	}
 }
 
 // MarkSlotInUse implements SlotSupplier.
 func (ms *memoryBoundSlotSupplier) MarkSlotInUse() {
-	ms.taskSlotsInUse.Add(1)
+	ms.taskSlotsInUseGauge.Update(float64(ms.taskSlotsInUse.Add(1)))
 }
 
 // MarkSlotNotInUse implements SlotSupplier.
 func (ms *memoryBoundSlotSupplier) MarkSlotNotInUse() {
-	defer ms.taskSlotsInUse.Add(-1)
+	ms.taskSlotsInUseGauge.Update(float64(ms.taskSlotsInUse.Add(-1)))
 }
 
 // ReleaseSlot implements SlotSupplier.
@@ -375,18 +377,19 @@ func bToMb(b uint64) uint64 {
 	return b / 1024 / 1024
 }
 
+func (ms *memoryBoundSlotSupplier) canReserveSlot() bool {
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	inUseMem := m.StackInuse + m.HeapInuse + m.MSpanInuse + m.MCacheInuse
+	projectedMemoryUsage := float64(inUseMem)
+	fmt.Printf("Projected Memory Usage: %d Mb\n", bToMb(inUseMem))
+	fmt.Printf("Allow new slot: %t\n", projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8)
+	return projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8
+}
+
 // ReserveSlot implements SlotSupplier.
 func (ms *memoryBoundSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
-	freeMemory := func() bool {
-		var m runtime.MemStats
-		runtime.ReadMemStats(&m)
-		inUseMem := m.StackInuse + m.HeapInuse + m.MSpanInuse + m.MCacheInuse
-		projectedMemoryUsage := float64(inUseMem)
-		fmt.Printf("Projected Memory Usage: %d Mb\n", bToMb(inUseMem))
-		fmt.Printf("Allow new slot: %t\n", projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8)
-		return projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8
-	}
-	if freeMemory() {
+	if ms.canReserveSlot() {
 		ms.taskSlots.Add(1)
 		return true
 	}
@@ -395,7 +398,7 @@ func (ms *memoryBoundSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
 	for {
 		select {
 		case <-ticker.C:
-			if freeMemory() {
+			if ms.canReserveSlot() {
 				ms.taskSlots.Add(1)
 				return true
 			}
@@ -407,17 +410,20 @@ func (ms *memoryBoundSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
 
 // TryReserveSlot implements SlotSupplier.
 func (ms *memoryBoundSlotSupplier) TryReserveSlot() bool {
-	// TODO: This should go through the same memory check as ReserveSlot
-	ms.taskSlots.Add(1)
-	return true
+	if ms.canReserveSlot() {
+		ms.taskSlots.Add(1)
+		return true
+	} else {
+		return false
+	}
 }
 
 func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) *semaphoreSlotSupplier {
 	s := &semaphoreSlotSupplier{
 		slots:                   make(chan struct{}, maxSlots),
-		taskSlotsAvailable:      int32(maxSlots),
 		taskSlotsAvailableGauge: taskSlotsAvailableGauge,
 	}
+	s.taskSlotsAvailable.Store(int32(maxSlots))
 	for i := 0; i < maxSlots; i++ {
 		s.slots <- struct{}{}
 	}
@@ -446,12 +452,12 @@ func (ss *semaphoreSlotSupplier) TryReserveSlot() bool {
 
 // MarkSlotInUse implements SlotSupplier.
 func (ss *semaphoreSlotSupplier) MarkSlotInUse() {
-	ss.taskSlotsAvailableGauge.Update(float64(atomic.AddInt32(&ss.taskSlotsAvailable, -1)))
+	ss.taskSlotsAvailableGauge.Update(float64(ss.taskSlotsAvailable.Add(-1)))
 }
 
 // MarkSlotNotInUse implements SlotSupplier.
 func (ss *semaphoreSlotSupplier) MarkSlotNotInUse() {
-	ss.taskSlotsAvailableGauge.Update(float64(atomic.AddInt32(&ss.taskSlotsAvailable, 1)))
+	ss.taskSlotsAvailableGauge.Update(float64(ss.taskSlotsAvailable.Add(1)))
 }
 
 // ReleaseSlot implements SlotSupplier.

@@ -219,6 +219,8 @@ type (
 
 		ActivitySlotSupplier SlotSupplier
 
+		LocalActivitySlotSupplier SlotSupplier
+
 		// Pointer to the shared worker cache
 		cache *WorkerCache
 
@@ -353,7 +355,7 @@ func newWorkflowTaskWorkerInternal(
 		params.Logger,
 		params.MetricsHandler,
 		nil,
-		nil,
+		params.LocalActivitySlotSupplier,
 	)
 
 	// 3) the result pushed to laTunnel will be send as task to workflow worker to process.
@@ -1599,6 +1601,7 @@ func NewAggregatedWorker(client *WorkflowClient, taskQueue string, options Worke
 		MaxHeartbeatThrottleInterval:          options.MaxHeartbeatThrottleInterval,
 		WorkflowSlotSupplier:                  options.WorkflowSlotSupplier,
 		ActivitySlotSupplier:                  options.ActivitySlotSupplier,
+		LocalActivitySlotSupplier:             options.LocalActivitySlotSupplier,
 		cache:                                 cache,
 		eagerActivityExecutor: newEagerActivityExecutor(eagerActivityExecutorOptions{
 			disabled:      options.DisableEagerActivities,
