@@ -1,3 +1,4 @@
+// Package tinkcodec implements a PayloadCodec backed by [github.com/tink-crypto/tink-go].
 package tinkcodec
 
 import (
