@@ -303,9 +303,9 @@ func InterruptCh() <-chan interface{} {
 	return internal.InterruptCh()
 }
 
-// NewSemaphoreSlotSupplier creates a new SemaphoreSlotSupplier
-func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) SlotSupplier {
-	return internal.NewSemaphoreSlotSupplier(maxSlots, taskSlotsAvailableGauge)
+// NewFixedSlotSupplier creates a new FixedSlotSupplier
+func NewFixedSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) SlotSupplier {
+	return internal.NewFixedSlotSupplier(maxSlots, taskSlotsAvailableGauge)
 }
 
 // NewMemoryBoundSlotSupplier creates a new MemoryBoundSlotSupplier

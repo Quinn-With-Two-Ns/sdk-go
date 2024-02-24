@@ -136,7 +136,10 @@ func (e *eagerActivityExecutor) handleResponse(
 		// Asynchronously execute
 		e.activityWorker.pushEagerTask(
 			eagerTask{
-				task: &activityTask{activity},
+				task: &activityTask{
+					task:  activity,
+					eager: true,
+				},
 				callback: func() {
 					// The processTaskAsync does not do this itself because our task is *activityTask, not *polledTask.
 					e.activityWorker.releaseSlot()

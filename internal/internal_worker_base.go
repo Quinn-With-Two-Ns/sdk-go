@@ -30,9 +30,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"runtime"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	commonpb "go.temporal.io/api/common/v1"
@@ -57,45 +55,14 @@ const (
 )
 
 var (
-	pollOperationRetryPolicy                               = createPollRetryPolicy()
-	pollResourceExhaustedRetryPolicy                       = createPollResourceExhaustedRetryPolicy()
-	retryLongPollGracePeriod                               = 2 * time.Minute
-	_                                SlotSupplier          = (*semaphoreSlotSupplier)(nil)
-	_                                SlotSupplier          = (*memoryBoundSlotSupplier)(nil)
-	_                                PauseableSlotSupplier = (*pauseableSlotSupplier)(nil)
+	pollOperationRetryPolicy         = createPollRetryPolicy()
+	pollResourceExhaustedRetryPolicy = createPollResourceExhaustedRetryPolicy()
+	retryLongPollGracePeriod         = 2 * time.Minute
 )
 
 var errStop = errors.New("worker stopping")
 
 type (
-	// SlotSupplier is used to reserve and release task slots
-	SlotSupplier interface {
-		// ReserveSlot tries to reserver a task slot on the worker, blocks until a slot is available or stopCh is closed.
-		// Returns false if no slot is reserved.
-		ReserveSlot(stopCh chan struct{}) bool
-		// TryReserveSlot tries to reserver a task slot on the worker without blocking
-		TryReserveSlot() bool
-		// MarkSlotInUse marks a slot as being used.
-		// TODO: May be useful to supply info about the task being executed.
-		MarkSlotInUse()
-		// MarkSlotNotInUse marks a slot as not being used
-		// TODO: This is only needed for eager tasks because they don't follow the normal task lifecycle.
-		// not clear why they can't be cleaned up in the same way as normal tasks.
-		MarkSlotNotInUse()
-		// ReleaseSlot release a task slot acquired by the supplier
-		// TODO: May be useful to supply info if processing the task failed.
-		ReleaseSlot(err error)
-	}
-
-	// PauseableSlotSupplier is a SlotSupplier that can be paused and unpaused
-	PauseableSlotSupplier interface {
-		SlotSupplier
-		// Pause pauses the slot supplier so no new slots can be reserved
-		Pause()
-		// Unpause unpauses the slot supplier so new slots can be reserved
-		Unpause()
-	}
-
 	// ResultHandler that returns result
 	ResultHandler func(result *commonpb.Payloads, err error)
 	// LocalActivityResultHandler that returns local activity result
@@ -240,230 +207,7 @@ type (
 		// callback to run once the task is processed.
 		callback func()
 	}
-
-	semaphoreSlotSupplier struct {
-		slots chan struct{}
-		// Must be atomically accessed
-		taskSlotsAvailable      atomic.Int32
-		taskSlotsAvailableGauge metrics.Gauge
-	}
-
-	memoryBoundSlotSupplier struct {
-		memoryUsageLimitBytes int
-		taskSlots             atomic.Int32
-		taskSlotsInUse        atomic.Int32
-		taskSlotsInUseGauge   metrics.Gauge
-	}
-
-	pauseableSlotSupplier struct {
-		// TODO track the number of slots in use to tell how "paused" we are
-		slotSupplier SlotSupplier
-		mutex        sync.Mutex
-		paused       bool
-		pauseWaitCh  chan struct{}
-	}
 )
-
-// MarkSlotInUse implements SlotSupplier.
-func (ps *pauseableSlotSupplier) MarkSlotInUse() {
-	ps.slotSupplier.MarkSlotInUse()
-}
-
-// MarkSlotNotInUse implements SlotSupplier.
-func (ps *pauseableSlotSupplier) MarkSlotNotInUse() {
-	ps.slotSupplier.MarkSlotNotInUse()
-}
-
-// ReleaseSlot implements SlotSupplier.
-func (ps *pauseableSlotSupplier) ReleaseSlot(err error) {
-	ps.slotSupplier.ReleaseSlot(err)
-}
-
-// ReserveSlot implements SlotSupplier.
-func (ps *pauseableSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
-	ps.mutex.Lock()
-	if ps.paused {
-		ch := ps.pauseWaitCh
-		ps.mutex.Unlock()
-		select {
-		case <-stopCh:
-			return false
-		case <-ch:
-		}
-	} else {
-		ps.mutex.Unlock()
-	}
-	slot := ps.slotSupplier.ReserveSlot(stopCh)
-	if !slot {
-		return false
-	}
-	// If we are paused, we need to release the slot we just acquired
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-	if ps.paused {
-		ps.slotSupplier.ReleaseSlot(nil)
-		return false
-	}
-	return slot
-}
-
-// TryReserveSlot implements SlotSupplier.
-func (ps *pauseableSlotSupplier) TryReserveSlot() bool {
-	if func() bool {
-		ps.mutex.Lock()
-		defer ps.mutex.Unlock()
-		return ps.paused
-	}() {
-		return false
-	}
-	// TryReserveSlot should not block so we don't need to check again after acquiring the slot
-	return ps.slotSupplier.TryReserveSlot()
-}
-
-func (ps *pauseableSlotSupplier) Pause() {
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
-	if ps.paused {
-		return
-	}
-
-	ps.paused = true
-}
-
-func (ps *pauseableSlotSupplier) Unpause() {
-	ps.mutex.Lock()
-	defer ps.mutex.Unlock()
-
-	if !ps.paused {
-		return
-	}
-	close(ps.pauseWaitCh)
-	ps.pauseWaitCh = make(chan struct{})
-	ps.paused = false
-
-}
-
-func NewPauseableSlotSupplier(slotSupplier SlotSupplier) *pauseableSlotSupplier {
-	return &pauseableSlotSupplier{
-		slotSupplier: slotSupplier,
-		pauseWaitCh:  make(chan struct{}),
-	}
-}
-
-func NewMemoryBoundSlotSupplier(memoryUsageLimitBytes int, taskSlotsInUseGauge metrics.Gauge) *memoryBoundSlotSupplier {
-	return &memoryBoundSlotSupplier{
-		memoryUsageLimitBytes: memoryUsageLimitBytes,
-		taskSlotsInUseGauge:   taskSlotsInUseGauge,
-	}
-}
-
-// MarkSlotInUse implements SlotSupplier.
-func (ms *memoryBoundSlotSupplier) MarkSlotInUse() {
-	ms.taskSlotsInUseGauge.Update(float64(ms.taskSlotsInUse.Add(1)))
-}
-
-// MarkSlotNotInUse implements SlotSupplier.
-func (ms *memoryBoundSlotSupplier) MarkSlotNotInUse() {
-	ms.taskSlotsInUseGauge.Update(float64(ms.taskSlotsInUse.Add(-1)))
-}
-
-// ReleaseSlot implements SlotSupplier.
-func (ms *memoryBoundSlotSupplier) ReleaseSlot(err error) {
-	ms.taskSlots.Add(-1)
-}
-
-func bToMb(b uint64) uint64 {
-	return b / 1024 / 1024
-}
-
-func (ms *memoryBoundSlotSupplier) canReserveSlot() bool {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
-	inUseMem := m.StackInuse + m.HeapInuse + m.MSpanInuse + m.MCacheInuse
-	projectedMemoryUsage := float64(inUseMem)
-	fmt.Printf("Projected Memory Usage: %d Mb\n", bToMb(inUseMem))
-	fmt.Printf("Allow new slot: %t\n", projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8)
-	return projectedMemoryUsage/float64(ms.memoryUsageLimitBytes) < 0.8
-}
-
-// ReserveSlot implements SlotSupplier.
-func (ms *memoryBoundSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
-	if ms.canReserveSlot() {
-		ms.taskSlots.Add(1)
-		return true
-	}
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ticker.C:
-			if ms.canReserveSlot() {
-				ms.taskSlots.Add(1)
-				return true
-			}
-		case <-stopCh:
-			return false
-		}
-	}
-}
-
-// TryReserveSlot implements SlotSupplier.
-func (ms *memoryBoundSlotSupplier) TryReserveSlot() bool {
-	if ms.canReserveSlot() {
-		ms.taskSlots.Add(1)
-		return true
-	} else {
-		return false
-	}
-}
-
-func NewSemaphoreSlotSupplier(maxSlots int, taskSlotsAvailableGauge metrics.Gauge) *semaphoreSlotSupplier {
-	s := &semaphoreSlotSupplier{
-		slots:                   make(chan struct{}, maxSlots),
-		taskSlotsAvailableGauge: taskSlotsAvailableGauge,
-	}
-	s.taskSlotsAvailable.Store(int32(maxSlots))
-	for i := 0; i < maxSlots; i++ {
-		s.slots <- struct{}{}
-	}
-	return s
-}
-
-// ReserveSlot implements SlotSupplier.
-func (ss *semaphoreSlotSupplier) ReserveSlot(stopCh chan struct{}) bool {
-	select {
-	case <-ss.slots:
-		return true
-	case <-stopCh:
-		return false
-	}
-}
-
-// TryReserveSlot implements SlotSupplier.
-func (ss *semaphoreSlotSupplier) TryReserveSlot() bool {
-	select {
-	case <-ss.slots:
-		return true
-	default:
-		return false
-	}
-}
-
-// MarkSlotInUse implements SlotSupplier.
-func (ss *semaphoreSlotSupplier) MarkSlotInUse() {
-	ss.taskSlotsAvailableGauge.Update(float64(ss.taskSlotsAvailable.Add(-1)))
-}
-
-// MarkSlotNotInUse implements SlotSupplier.
-func (ss *semaphoreSlotSupplier) MarkSlotNotInUse() {
-	ss.taskSlotsAvailableGauge.Update(float64(ss.taskSlotsAvailable.Add(1)))
-}
-
-// ReleaseSlot implements SlotSupplier.
-func (ss *semaphoreSlotSupplier) ReleaseSlot(err error) {
-	ss.slots <- struct{}{}
-}
 
 // SetRetryLongPollGracePeriod sets the amount of time a long poller retries on
 // fatal errors before it actually fails. For test use only,
@@ -504,7 +248,7 @@ func newBaseWorker(
 ) *baseWorker {
 	mh := metricsHandler.WithTags(metrics.WorkerTags(options.workerType))
 	if slotSupplier == nil {
-		slotSupplier = NewSemaphoreSlotSupplier(options.maxConcurrentTask, metricsHandler.Gauge(metrics.WorkerTaskSlotsAvailable))
+		slotSupplier = NewFixedSlotSupplier(options.maxConcurrentTask, metricsHandler.Gauge(metrics.WorkerTaskSlotsAvailable))
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	bw := &baseWorker{
@@ -728,18 +472,19 @@ func isNonRetriableError(err error) bool {
 func (bw *baseWorker) processTask(task interface{}) {
 	defer bw.stopWG.Done()
 
-	// TODO pass task?
-	bw.slotSupplier.MarkSlotInUse()
-	defer func() {
-		bw.slotSupplier.MarkSlotNotInUse()
-	}()
-
 	// If the task is from poller, after processing it we would need to request a new poll. Otherwise, the task is from
 	// local activity worker, we don't need a new poll from server.
 	polledTask, isPolledTask := task.(*polledTask)
 	if isPolledTask {
 		task = polledTask.task
 	}
+
+	slotInfo := taskToSlotInfo(task)
+	bw.slotSupplier.MarkSlotInUse(slotInfo)
+	defer func() {
+		bw.slotSupplier.MarkSlotNotInUse(slotInfo)
+	}()
+
 	defer func() {
 		if p := recover(); p != nil {
 			topLine := fmt.Sprintf("base worker for %s [panic]:", bw.options.workerType)
