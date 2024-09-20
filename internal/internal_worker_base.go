@@ -579,7 +579,14 @@ func (bw *baseWorker) Stop() {
 	}
 	close(bw.stopCh)
 	bw.limiterContextCancel()
-
+	bw.stopWG.Add(1)
+	go func() {
+		defer bw.stopWG.Done()
+		err := bw.options.taskWorker.Shutdown()
+		if err != nil {
+			bw.logger.Warn("Could not shut down task poller.", tagError, err)
+		}
+	}()
 	if success := awaitWaitGroup(&bw.stopWG, bw.options.stopTimeout); !success {
 		traceLog(func() {
 			bw.logger.Info("Worker graceful stop timed out.", "Stop timeout", bw.options.stopTimeout)

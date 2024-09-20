@@ -41,6 +41,7 @@ import (
 	commonpb "go.temporal.io/api/common/v1"
 	enumspb "go.temporal.io/api/enums/v1"
 	historypb "go.temporal.io/api/history/v1"
+	"go.temporal.io/api/serviceerror"
 	taskqueuepb "go.temporal.io/api/taskqueue/v1"
 	"go.temporal.io/api/workflowservice/v1"
 
@@ -68,6 +69,8 @@ type (
 		PollTask() (taskForWorker, error)
 		// ProcessTask processes a task
 		ProcessTask(interface{}) error
+		// Shutdown
+		Shutdown() error
 	}
 
 	taskForWorker interface {
@@ -314,6 +317,25 @@ func (wtp *workflowTaskPoller) PollTask() (taskForWorker, error) {
 	return workflowTask, nil
 }
 
+func (wtp *workflowTaskPoller) Shutdown() error {
+	ctx := context.Background()
+	// Respond task completion.
+	grpcCtx, cancel := newGRPCContext(ctx, grpcMetricsHandler(wtp.metricsHandler),
+		defaultGrpcRetryParameters(ctx))
+	defer cancel()
+	_, err := wtp.service.ShutdownWorker(grpcCtx, &workflowservice.ShutdownWorkerRequest{
+		Namespace:       wtp.namespace,
+		StickyTaskQueue: getWorkerTaskQueue(wtp.stickyUUID),
+		Identity:        wtp.identity,
+		Reason:          "worker shutdown",
+	})
+	// We ignore unimplemented
+	if _, isUnimplemented := err.(*serviceerror.Unimplemented); isUnimplemented {
+		return nil
+	}
+	return fmt.Errorf("failed to reset sticky task queue: %w", err)
+}
+
 // ProcessTask processes a task which could be workflow task or local activity result
 func (wtp *workflowTaskPoller) ProcessTask(task interface{}) error {
 	if wtp.stopping() {
@@ -547,6 +569,10 @@ func newLocalActivityPoller(
 
 func (latp *localActivityTaskPoller) PollTask() (taskForWorker, error) {
 	return latp.laTunnel.getTask(), nil
+}
+
+func (wtp *localActivityTaskPoller) Shutdown() error {
+	return nil
 }
 
 func (latp *localActivityTaskPoller) ProcessTask(task interface{}) error {
@@ -981,6 +1007,10 @@ func (atp *activityTaskPoller) PollTask() (taskForWorker, error) {
 		return nil, err
 	}
 	return activityTask, nil
+}
+
+func (atp *activityTaskPoller) Shutdown() error {
+	return nil
 }
 
 // ProcessTask processes a new task

@@ -241,6 +241,10 @@ func (*waitingTaskProcessor) PollTask() (taskForWorker, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
+func (*waitingTaskProcessor) Shutdown() error {
+	return nil
+}
+
 func (w *waitingTaskProcessor) ProcessTask(interface{}) error {
 	atomic.AddInt32(&w.numWaiting, 1)
 	defer atomic.AddInt32(&w.numWaiting, -1)

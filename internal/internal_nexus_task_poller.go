@@ -114,6 +114,10 @@ func (ntp *nexusTaskPoller) PollTask() (taskForWorker, error) {
 	return ntp.doPoll(ntp.poll)
 }
 
+func (ntp *nexusTaskPoller) Shutdown() error {
+	return nil
+}
+
 // ProcessTask processes a new task
 func (ntp *nexusTaskPoller) ProcessTask(task interface{}) error {
 	if ntp.stopping() {
