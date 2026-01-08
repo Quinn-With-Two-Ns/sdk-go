@@ -421,6 +421,9 @@ type ClientUpdateWorkflowInput struct {
 	RunID               string
 	FirstExecutionRunID string
 	WaitForStage        WorkflowUpdateStage
+	// update completion callback. Only settable by the SDK.
+	callbacks    []*commonpb.Callback
+	responseInfo *WorkflowUpdateResponseInfo
 }
 
 // Exposed as: [go.temporal.io/sdk/interceptor.ClientUpdateWithStartWorkflowInput]

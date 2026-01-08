@@ -72,4 +72,5 @@ replace (
 	go.temporal.io/sdk/contrib/opentracing => ../contrib/opentracing
 	go.temporal.io/sdk/contrib/resourcetuner => ../contrib/resourcetuner
 	go.temporal.io/sdk/contrib/tally => ../contrib/tally
+	go.temporal.io/api => ../../release/api-go
 )

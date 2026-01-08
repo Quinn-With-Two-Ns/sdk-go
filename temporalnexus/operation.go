@@ -19,8 +19,10 @@ package temporalnexus
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/nexus-rpc/sdk-go/nexus"
 	"go.temporal.io/api/common/v1"
 	"go.temporal.io/api/enums/v1"
@@ -386,4 +388,118 @@ func convertNexusLinks(nexusLinks []nexus.Link, log log.Logger) ([]*common.Link,
 		}
 	}
 	return links, nil
+}
+
+// NewWorkflowRunOperation maps an operation to a workflow run.
+func NewWorkflowUpdateOperation[I, O any](
+	name string,
+	getOptions func(context.Context, I, nexus.StartOperationOptions) (client.UpdateWorkflowOptions, error),
+) nexus.Operation[I, O] {
+	if strings.HasPrefix(name, "__temporal_") {
+		panic(errors.New("temporalnexus NewWorkflowRunOperation __temporal_ is an invalid name"))
+	}
+	return &workflowUpdateOperation[I, O]{
+		options: WorkflowUpdateOperationOptions[I, O]{
+			Name:       name,
+			GetOptions: getOptions,
+		},
+	}
+}
+
+type workflowUpdateOperation[I, O any] struct {
+	nexus.UnimplementedOperation[I, O]
+	options WorkflowUpdateOperationOptions[I, O]
+}
+
+// WorkflowUpdateOperationOptions are options for [NewWorkflowUpdateOperationWithOptions].
+type WorkflowUpdateOperationOptions[I, O any] struct {
+	// Operation name.
+	Name       string
+	GetOptions func(context.Context, I, nexus.StartOperationOptions) (client.UpdateWorkflowOptions, error)
+}
+
+func (o *workflowUpdateOperation[I, O]) Start(
+	ctx context.Context,
+	input I,
+	options nexus.StartOperationOptions,
+) (nexus.HandlerStartOperationResult[O], error) {
+	logger := GetLogger(ctx)
+	_, ok := internal.NexusOperationContextFromGoContext(ctx)
+	if !ok {
+		return nil, nexus.HandlerErrorf(nexus.HandlerErrorTypeInternal, "internal error")
+	}
+
+	updateOpts, err := o.options.GetOptions(ctx, input, options)
+	if err != nil {
+		return nil, err
+	}
+	// Validate required fields.
+	if updateOpts.UpdateID == "" {
+		return nil, nexus.HandlerErrorf(nexus.HandlerErrorTypeBadRequest, "missing UpdateID in workflow update options")
+	}
+	if updateOpts.WorkflowID == "" {
+		return nil, nexus.HandlerErrorf(nexus.HandlerErrorTypeBadRequest, "missing WorkflowID in workflow update options")
+	}
+	if updateOpts.WaitForStage == client.WorkflowUpdateStageAdmitted {
+		return nil, nexus.HandlerErrorf(nexus.HandlerErrorTypeBadRequest, "invalid WaitForStage: ADMITTED is not supported")
+	}
+	// Set default WaitForStage if not provided.
+	if updateOpts.WaitForStage == client.WorkflowUpdateStageUnspecified {
+		updateOpts.WaitForStage = client.WorkflowUpdateStageAccepted
+	}
+
+	links, err := convertNexusLinks(options.Links, GetLogger(ctx))
+	if err != nil {
+		return nil, &nexus.HandlerError{
+			Type:  nexus.HandlerErrorTypeBadRequest,
+			Cause: err,
+		}
+	}
+
+	token := updateOpts.UpdateID + ":" + uuid.NewString()
+
+	if options.CallbackURL != "" {
+		if options.CallbackHeader == nil {
+			options.CallbackHeader = make(nexus.Header)
+		}
+		options.CallbackHeader.Set(nexus.HeaderOperationToken, token)
+		updateOpts.Callbacks = []*common.Callback{
+			{
+				Variant: &common.Callback_Nexus_{
+					Nexus: &common.Callback_Nexus{
+						Url:    options.CallbackURL,
+						Header: options.CallbackHeader,
+					},
+				},
+				Links: links,
+			},
+		}
+	}
+
+	responseInfo := &internal.WorkflowUpdateResponseInfo{}
+	updateOpts.ResponseInfo = responseInfo
+	logger.Info("Starting workflow update operation", "updateID", updateOpts.UpdateID, "workflowID", updateOpts.WorkflowID, "runID", updateOpts.RunID)
+	_, err = GetClient(ctx).UpdateWorkflow(ctx, updateOpts)
+	if err != nil {
+		fmt.Printf("Update failure! %v\n", err)
+		logger.Error("failed to start workflow update operation", "error", err)
+		return nil, err
+	}
+
+	if responseInfo.Link != nil {
+		nexus.AddHandlerLinks(ctx, ConvertLinkWorkflowEventToNexusLink(responseInfo.Link.GetWorkflowEvent()))
+	}
+
+	return &nexus.HandlerStartOperationResultAsync{
+		OperationToken: token,
+	}, nil
+}
+
+func (*workflowUpdateOperation[I, O]) Cancel(ctx context.Context, token string, options nexus.CancelOperationOptions) error {
+	// TODO(quinn): Update does not support cancellation yet.
+	return nil
+}
+
+func (o *workflowUpdateOperation[I, O]) Name() string {
+	return o.options.Name
 }

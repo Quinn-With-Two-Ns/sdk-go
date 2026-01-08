@@ -2906,3 +2906,103 @@ func TestNexusTracingInterceptor(t *testing.T) {
 		})
 	}
 }
+
+const UpdateName = "update-handler"
+
+var workflowUpdateOp = temporalnexus.NewWorkflowUpdateOperation[string, string](
+	"workflow-update",
+	func(ctx context.Context, id string, soo nexus.StartOperationOptions) (client.UpdateWorkflowOptions, error) {
+		return client.UpdateWorkflowOptions{
+			UpdateID:   "update-" + id,
+			WorkflowID: id,
+			UpdateName: UpdateName,
+			Args:       []interface{}{"Hello"},
+		}, nil
+	},
+)
+
+func childWorkflowOp(ctx workflow.Context, input string) (string, error) {
+	logger := workflow.GetLogger(ctx)
+	logger.Info("Child workflow started", "input", input)
+	workflow.SetUpdateHandler(ctx, UpdateName, func(ctx workflow.Context, input string) (string, error) {
+		logger = workflow.GetLogger(ctx)
+		logger.Info("Update handler called", "input", input)
+		err := workflow.Sleep(ctx, 1*time.Second) // Simulate some work
+		if err != nil {
+			return "", err
+		}
+		return "updated: " + input, nil
+	})
+	// Wait indefinitely
+	signalCh := workflow.GetSignalChannel(ctx, "stop")
+	signalCh.Receive(ctx, nil)
+	return "done: " + input, nil
+}
+
+func callUpdateNexusOperation(ctx workflow.Context, endpoint string) (string, error) {
+	logger := workflow.GetLogger(ctx)
+	logger.Info("Starting child workflow")
+	cwf := workflow.ExecuteChildWorkflow(ctx, childWorkflowOp, "initial input")
+	var childWE workflow.Execution
+	err := cwf.GetChildWorkflowExecution().Get(ctx, &childWE)
+	if err != nil {
+		return "", err
+	}
+	logger.Info("Calling update nexus operation")
+	client := workflow.NewNexusClient(endpoint, "test")
+	fut := client.ExecuteOperation(ctx, workflowUpdateOp, childWE.ID, workflow.NexusOperationOptions{
+		ScheduleToCloseTimeout: 5 * time.Minute,
+	})
+	var exec workflow.NexusOperationExecution
+	if err := fut.GetNexusOperationExecution().Get(ctx, &exec); err != nil {
+		return "", err
+	}
+
+	// Send a second update to verify attaching after starting works
+	afut := client.ExecuteOperation(ctx, workflowUpdateOp, childWE.ID, workflow.NexusOperationOptions{
+		ScheduleToCloseTimeout: 5 * time.Minute,
+	})
+
+	var aexec workflow.NexusOperationExecution
+	if err := afut.GetNexusOperationExecution().Get(ctx, &aexec); err != nil {
+		return "", err
+	}
+
+	// err = cwf.SignalChildWorkflow(ctx, "stop", nil).Get(ctx, nil)
+	// if err != nil {
+	// 	return "", err
+	// }
+
+	var aresult string
+	afut.Get(ctx, &aresult)
+	logger.Info("Second update result", "result", aresult)
+	var result string
+	err = fut.Get(ctx, &result)
+	return result, err
+}
+
+func TestNexusWorkflowUpdateOperation(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), defaultNexusTestTimeout)
+	defer cancel()
+	tc := newTestContext(t, ctx)
+
+	w := worker.New(tc.client, tc.taskQueue, worker.Options{})
+	service := nexus.NewService("test")
+	require.NoError(t, service.Register(workflowUpdateOp, workflowOp))
+	w.RegisterNexusService(service)
+	w.RegisterWorkflow(waitForCancelWorkflow)
+	w.RegisterWorkflow(callUpdateNexusOperation)
+	w.RegisterWorkflow(childWorkflowOp)
+	require.NoError(t, w.Start())
+	t.Cleanup(w.Stop)
+
+	wfRun, err := tc.client.ExecuteWorkflow(ctx, client.StartWorkflowOptions{
+		TaskQueue:                tc.taskQueue,
+		ID:                       "Update  Test " + uuid.NewString(),
+		WorkflowExecutionTimeout: defaultNexusTestTimeout,
+	}, callUpdateNexusOperation, tc.endpoint)
+	require.NoError(t, err)
+	var updateResult string
+	require.NoError(t, wfRun.Get(ctx, &updateResult))
+	require.Equal(t, "updated: Hello", updateResult)
+}

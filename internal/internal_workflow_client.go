@@ -792,6 +792,16 @@ type UpdateWorkflowOptions struct {
 	// then the server will reject the update request with an error.
 	// Note that it is incompatible with UpdateWithStartWorkflowOperation.
 	FirstExecutionRunID string
+
+	// update completion callback. Only settable by the SDK.
+	Callbacks []*commonpb.Callback
+
+	ResponseInfo *WorkflowUpdateResponseInfo
+}
+
+type WorkflowUpdateResponseInfo struct {
+	// Link to the workflow event.
+	Link *commonpb.Link
 }
 
 // UpdateWithStartWorkflowOptions encapsulates the parameters used by UpdateWithStartWorkflow.
@@ -2358,6 +2368,9 @@ func (w *workflowClientInterceptor) UpdateWorkflow(
 
 	// Here we know the update is at least accepted
 	desiredLifecycleStage := updateLifeCycleStageToProto(in.WaitForStage)
+	if in.responseInfo != nil {
+		in.responseInfo.Link = resp.GetLink()
+	}
 	return w.updateHandleFromResponse(ctx, desiredLifecycleStage, resp)
 }
 
@@ -2391,6 +2404,8 @@ func createUpdateWorkflowInput(options *UpdateWorkflowOptions) (*ClientUpdateWor
 		RunID:               options.RunID,
 		FirstExecutionRunID: options.FirstExecutionRunID,
 		WaitForStage:        options.WaitForStage,
+		callbacks:           options.Callbacks,
+		responseInfo:        options.ResponseInfo,
 	}, nil
 }
 
@@ -2430,6 +2445,7 @@ func (w *workflowClientInterceptor) createUpdateWorkflowRequest(
 				Name:   in.UpdateName,
 				Args:   argPayloads,
 			},
+			CompletionCallbacks: in.callbacks,
 		},
 	}, nil
 }
