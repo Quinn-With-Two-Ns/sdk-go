@@ -450,6 +450,38 @@ type ClientOutboundInterceptor interface {
 	// NOTE: Experimental
 	PollActivityResult(context.Context, *ClientPollActivityResultInput) (*ClientPollActivityResultOutput, error)
 
+	// ExecuteCallback intercepts client.Client.ExecuteCallback.
+	//
+	// NOTE: Experimental
+	ExecuteCallback(context.Context, *ClientExecuteCallbackInput) (ClientCallbackHandle, error)
+
+	// GetCallbackHandle intercepts client.Client.GetCallbackHandle.
+	// While the interceptor is allowed to make network calls here, note that the base implementation does not - it only constructs
+	// the handle which is then used to make network calls. There is no context object provided and errors cannot be returned.
+	//
+	// NOTE: Experimental
+	GetCallbackHandle(*ClientGetCallbackHandleInput) ClientCallbackHandle
+
+	// CancelCallback intercepts client.CallbackHandle.Cancel.
+	//
+	// NOTE: Experimental
+	CancelCallback(context.Context, *ClientCancelCallbackInput) error
+
+	// TerminateCallback intercepts client.CallbackHandle.Terminate.
+	//
+	// NOTE: Experimental
+	TerminateCallback(context.Context, *ClientTerminateCallbackInput) error
+
+	// DescribeCallback intercepts client.CallbackHandle.Describe.
+	//
+	// NOTE: Experimental
+	DescribeCallback(context.Context, *ClientDescribeCallbackInput) (*ClientDescribeCallbackOutput, error)
+
+	// PollCallbackResult intercepts client.CallbackHandle.Get.
+	//
+	// NOTE: Experimental
+	PollCallbackResult(context.Context, *ClientPollCallbackResultInput) (*ClientPollCallbackResultOutput, error)
+
 	mustEmbedClientOutboundInterceptorBase()
 }
 
@@ -667,6 +699,90 @@ type ClientPollActivityResultOutput struct {
 	// Result is the result of the update, if it has completed successfully.
 	Result converter.EncodedValue
 	// Error is the result of a failed update.
+	Error error
+}
+
+// ClientExecuteCallbackInput is the input to
+// ClientOutboundInterceptor.ExecuteCallback.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientExecuteCallbackInput]
+type ClientExecuteCallbackInput struct {
+	Options    *ClientStartCallbackOptions
+	Completion any // the raw completion value (success value or error)
+}
+
+// ClientGetCallbackHandleInput is the input to
+// ClientOutboundInterceptor.GetCallbackHandle.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientGetCallbackHandleInput]
+type ClientGetCallbackHandleInput struct {
+	CallbackID string
+}
+
+// ClientCancelCallbackInput is the input to
+// ClientOutboundInterceptor.CancelCallback.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientCancelCallbackInput]
+type ClientCancelCallbackInput struct {
+	CallbackID string
+	Reason     string
+}
+
+// ClientTerminateCallbackInput is the input to
+// ClientOutboundInterceptor.TerminateCallback.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientTerminateCallbackInput]
+type ClientTerminateCallbackInput struct {
+	CallbackID string
+	Reason     string
+}
+
+// ClientDescribeCallbackInput is the input to
+// ClientOutboundInterceptor.DescribeCallback.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientDescribeCallbackInput]
+type ClientDescribeCallbackInput struct {
+	CallbackID string
+}
+
+// ClientDescribeCallbackOutput is the output of
+// ClientOutboundInterceptor.DescribeCallback.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientDescribeCallbackOutput]
+type ClientDescribeCallbackOutput struct {
+	Description *ClientCallbackExecutionDescription
+}
+
+// ClientPollCallbackResultInput is the input to
+// ClientOutboundInterceptor.PollCallbackResult.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientPollCallbackResultInput]
+type ClientPollCallbackResultInput struct {
+	CallbackID string
+}
+
+// ClientPollCallbackResultOutput is the output of
+// ClientOutboundInterceptor.PollCallbackResult.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientPollCallbackResultOutput]
+type ClientPollCallbackResultOutput struct {
+	// Error is the failure result, nil on success.
 	Error error
 }
 

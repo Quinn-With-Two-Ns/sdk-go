@@ -533,6 +533,34 @@ type (
 		// NOTE: Experimental
 		CountActivities(ctx context.Context, options ClientCountActivitiesOptions) (*ClientCountActivitiesResult, error)
 
+		// ExecuteCallback starts a standalone callback execution and returns a CallbackHandle.
+		// The callback delivers a Nexus completion to the specified callback URL.
+		//
+		// The completion parameter accepts either a success value (any type, serialized as a payload)
+		// or an error (converted to a failure). A nil completion is treated as success with an empty payload.
+		//
+		// NOTE: Experimental
+		ExecuteCallback(ctx context.Context, options ClientStartCallbackOptions, completion any) (ClientCallbackHandle, error)
+
+		// GetCallbackHandle creates a handle to the referenced callback.
+		//
+		// NOTE: Experimental
+		GetCallbackHandle(options ClientGetCallbackHandleOptions) ClientCallbackHandle
+
+		// ListCallbacks lists callback executions based on query.
+		//
+		// Currently, all errors are returned in the iterator and not the base level error.
+		//
+		// NOTE: Experimental
+		ListCallbacks(ctx context.Context, options ClientListCallbacksOptions) (ClientListCallbacksResult, error)
+
+		// CountCallbacks counts callback executions based on query. The result
+		// includes the total count and optionally grouped counts if the query includes
+		// a GROUP BY clause.
+		//
+		// NOTE: Experimental
+		CountCallbacks(ctx context.Context, options ClientCountCallbacksOptions) (*ClientCountCallbacksResult, error)
+
 		// WorkflowService provides access to the underlying gRPC service. This should only be used for advanced use cases
 		// that cannot be accomplished via other Client methods. Unlike calls to other Client methods, calls directly to the
 		// service are not configured with internal semantics such as automatic retries.

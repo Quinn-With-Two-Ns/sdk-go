@@ -635,6 +635,65 @@ func (c *ClientOutboundInterceptorBase) PollActivityResult(
 	return c.Next.PollActivityResult(ctx, in)
 }
 
+// ExecuteCallback implements ClientOutboundInterceptor.ExecuteCallback.
+//
+// NOTE: Experimental
+func (c *ClientOutboundInterceptorBase) ExecuteCallback(
+	ctx context.Context,
+	in *ClientExecuteCallbackInput,
+) (ClientCallbackHandle, error) {
+	return c.Next.ExecuteCallback(ctx, in)
+}
+
+// GetCallbackHandle implements ClientOutboundInterceptor.GetCallbackHandle.
+//
+// NOTE: Experimental
+func (c *ClientOutboundInterceptorBase) GetCallbackHandle(
+	in *ClientGetCallbackHandleInput,
+) ClientCallbackHandle {
+	return c.Next.GetCallbackHandle(in)
+}
+
+// CancelCallback implements ClientOutboundInterceptor.CancelCallback.
+//
+// NOTE: Experimental
+func (c *ClientOutboundInterceptorBase) CancelCallback(
+	ctx context.Context,
+	in *ClientCancelCallbackInput,
+) error {
+	return c.Next.CancelCallback(ctx, in)
+}
+
+// TerminateCallback implements ClientOutboundInterceptor.TerminateCallback.
+//
+// NOTE: Experimental
+func (c *ClientOutboundInterceptorBase) TerminateCallback(
+	ctx context.Context,
+	in *ClientTerminateCallbackInput,
+) error {
+	return c.Next.TerminateCallback(ctx, in)
+}
+
+// DescribeCallback implements ClientOutboundInterceptor.DescribeCallback.
+//
+// NOTE: Experimental
+func (c *ClientOutboundInterceptorBase) DescribeCallback(
+	ctx context.Context,
+	in *ClientDescribeCallbackInput,
+) (*ClientDescribeCallbackOutput, error) {
+	return c.Next.DescribeCallback(ctx, in)
+}
+
+// PollCallbackResult implements ClientOutboundInterceptor.PollCallbackResult.
+//
+// NOTE: Experimental
+func (c *ClientOutboundInterceptorBase) PollCallbackResult(
+	ctx context.Context,
+	in *ClientPollCallbackResultInput,
+) (*ClientPollCallbackResultOutput, error) {
+	return c.Next.PollCallbackResult(ctx, in)
+}
+
 func (*ClientOutboundInterceptorBase) mustEmbedClientOutboundInterceptorBase() {}
 
 // NexusOperationInboundInterceptorBase is a default implementation of [NexusOperationInboundInterceptor] that

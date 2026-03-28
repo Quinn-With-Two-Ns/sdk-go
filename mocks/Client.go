@@ -1294,6 +1294,100 @@ func (_m *Client) CountActivities(ctx context.Context, options client.CountActiv
 	return r0, r1
 }
 
+func (_m *Client) ExecuteCallback(ctx context.Context, options client.StartCallbackOptions, completion any) (client.CallbackHandle, error) {
+	ret := _m.Called(ctx, options, completion)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExecuteCallback")
+	}
+
+	var r0 client.CallbackHandle
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, client.StartCallbackOptions, any) (client.CallbackHandle, error)); ok {
+		return rf(ctx, options, completion)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, client.StartCallbackOptions, any) client.CallbackHandle); ok {
+		r0 = rf(ctx, options, completion)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(client.CallbackHandle)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, client.StartCallbackOptions, any) error); ok {
+		r1 = rf(ctx, options, completion)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *Client) GetCallbackHandle(options client.GetCallbackHandleOptions) client.CallbackHandle {
+	ret := _m.Called(options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCallbackHandle")
+	}
+
+	var r0 client.CallbackHandle
+	if rf, ok := ret.Get(0).(func(client.GetCallbackHandleOptions) client.CallbackHandle); ok {
+		r0 = rf(options)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(client.CallbackHandle)
+		}
+	}
+
+	return r0
+}
+
+func (_m *Client) ListCallbacks(ctx context.Context, options client.ListCallbacksOptions) (client.ListCallbacksResult, error) {
+	ret := _m.Called(ctx, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ListCallbacks")
+	}
+
+	var r0 client.ListCallbacksResult
+	if rf, ok := ret.Get(0).(func(context.Context, client.ListCallbacksOptions) client.ListCallbacksResult); ok {
+		r0 = rf(ctx, options)
+	} else {
+		r0 = ret.Get(0).(client.ListCallbacksResult)
+	}
+
+	return r0, nil
+}
+
+func (_m *Client) CountCallbacks(ctx context.Context, options client.CountCallbacksOptions) (*client.CountCallbacksResult, error) {
+	ret := _m.Called(ctx, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for CountCallbacks")
+	}
+
+	var r0 *client.CountCallbacksResult
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, client.CountCallbacksOptions) (*client.CountCallbacksResult, error)); ok {
+		return rf(ctx, options)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, client.CountCallbacksOptions) *client.CountCallbacksResult); ok {
+		r0 = rf(ctx, options)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*client.CountCallbacksResult)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, client.CountCallbacksOptions) error); ok {
+		r1 = rf(ctx, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
 // WorkerDeploymentClient provides a mock function with given fields:
 func (_m *Client) WorkerDeploymentClient() client.WorkerDeploymentClient {
 	ret := _m.Called()

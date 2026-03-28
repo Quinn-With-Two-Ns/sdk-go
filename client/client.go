@@ -985,6 +985,72 @@ type (
 	// NOTE: Experimental
 	TerminateActivityOptions = internal.ClientTerminateActivityOptions
 
+	// StartCallbackOptions contains configuration parameters for starting a callback execution.
+	//
+	// NOTE: Experimental
+	StartCallbackOptions = internal.ClientStartCallbackOptions
+
+	// GetCallbackHandleOptions contains input for GetCallbackHandle call.
+	//
+	// NOTE: Experimental
+	GetCallbackHandleOptions = internal.ClientGetCallbackHandleOptions
+
+	// ListCallbacksOptions contains input for ListCallbacks call.
+	//
+	// NOTE: Experimental
+	ListCallbacksOptions = internal.ClientListCallbacksOptions
+
+	// ListCallbacksResult contains the result of the ListCallbacks call.
+	//
+	// NOTE: Experimental
+	ListCallbacksResult = internal.ClientListCallbacksResult
+
+	// CountCallbacksOptions contains input for CountCallbacks call.
+	//
+	// NOTE: Experimental
+	CountCallbacksOptions = internal.ClientCountCallbacksOptions
+
+	// CountCallbacksResult contains the result of the CountCallbacks call.
+	//
+	// NOTE: Experimental
+	CountCallbacksResult = internal.ClientCountCallbacksResult
+
+	// CountCallbacksAggregationGroup contains groups of callbacks if
+	// CountCallbackExecutions is grouped by a field.
+	//
+	// NOTE: Experimental
+	CountCallbacksAggregationGroup = internal.ClientCountCallbacksAggregationGroup
+
+	// CallbackHandle represents a running or completed standalone callback execution.
+	//
+	// NOTE: Experimental
+	CallbackHandle = internal.ClientCallbackHandle
+
+	// CallbackExecutionInfo contains information about a callback execution.
+	//
+	// NOTE: Experimental
+	CallbackExecutionInfo = internal.ClientCallbackExecutionInfo
+
+	// CallbackExecutionDescription contains detailed information about a callback execution.
+	//
+	// NOTE: Experimental
+	CallbackExecutionDescription = internal.ClientCallbackExecutionDescription
+
+	// DescribeCallbackOptions contains options for CallbackHandle.Describe call.
+	//
+	// NOTE: Experimental
+	DescribeCallbackOptions = internal.ClientDescribeCallbackOptions
+
+	// CancelCallbackOptions contains options for CallbackHandle.Cancel call.
+	//
+	// NOTE: Experimental
+	CancelCallbackOptions = internal.ClientCancelCallbackOptions
+
+	// TerminateCallbackOptions contains options for CallbackHandle.Terminate call.
+	//
+	// NOTE: Experimental
+	TerminateCallbackOptions = internal.ClientTerminateCallbackOptions
+
 	// Client is the client for starting and getting information about a workflow executions as well as
 	// completing activities asynchronously.
 	Client interface {
@@ -1498,6 +1564,34 @@ type (
 		//
 		// NOTE: Experimental
 		CountActivities(ctx context.Context, options CountActivitiesOptions) (*CountActivitiesResult, error)
+
+		// ExecuteCallback starts a standalone callback execution and returns a CallbackHandle.
+		// The callback delivers a Nexus completion to the specified callback URL.
+		//
+		// The completion parameter accepts either a success value (any type, serialized as a payload)
+		// or an error (converted to a failure). A nil completion is treated as success with an empty payload.
+		//
+		// NOTE: Experimental
+		ExecuteCallback(ctx context.Context, options StartCallbackOptions, completion any) (CallbackHandle, error)
+
+		// GetCallbackHandle creates a handle to the referenced callback.
+		//
+		// NOTE: Experimental
+		GetCallbackHandle(options GetCallbackHandleOptions) CallbackHandle
+
+		// ListCallbacks lists callback executions based on query.
+		//
+		// Currently, all errors are returned in the iterator and not the base level error.
+		//
+		// NOTE: Experimental
+		ListCallbacks(ctx context.Context, options ListCallbacksOptions) (ListCallbacksResult, error)
+
+		// CountCallbacks counts callback executions based on query. The result
+		// includes the total count and optionally grouped counts if the query includes
+		// a GROUP BY clause.
+		//
+		// NOTE: Experimental
+		CountCallbacks(ctx context.Context, options CountCallbacksOptions) (*CountCallbacksResult, error)
 
 		// WorkflowService provides access to the underlying gRPC service. This should only be used for advanced use cases
 		// that cannot be accomplished via other Client methods. Unlike calls to other Client methods, calls directly to the

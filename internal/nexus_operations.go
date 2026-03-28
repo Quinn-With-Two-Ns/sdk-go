@@ -772,6 +772,22 @@ func (t *testSuiteClientForNexusOperations) CountActivities(ctx context.Context,
 	panic("unimplemented in the test environment")
 }
 
+func (t *testSuiteClientForNexusOperations) ExecuteCallback(ctx context.Context, options ClientStartCallbackOptions, completion any) (ClientCallbackHandle, error) {
+	panic("unimplemented in the test environment")
+}
+
+func (t *testSuiteClientForNexusOperations) GetCallbackHandle(options ClientGetCallbackHandleOptions) ClientCallbackHandle {
+	panic("unimplemented in the test environment")
+}
+
+func (t *testSuiteClientForNexusOperations) ListCallbacks(ctx context.Context, options ClientListCallbacksOptions) (ClientListCallbacksResult, error) {
+	panic("unimplemented in the test environment")
+}
+
+func (t *testSuiteClientForNexusOperations) CountCallbacks(ctx context.Context, options ClientCountCallbacksOptions) (*ClientCountCallbacksResult, error) {
+	panic("unimplemented in the test environment")
+}
+
 // WorkflowService implements Client.
 func (t *testSuiteClientForNexusOperations) WorkflowService() workflowservice.WorkflowServiceClient {
 	panic("not implemented in the test environment")
