@@ -17,6 +17,56 @@ import (
 
 const pollCallbackTimeout = 60 * time.Second
 
+// CallbackTarget is an interface representing a callback target. Only the SDK
+// can implement this interface — the unexported method prevents external
+// implementations.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/client.CallbackTarget]
+type CallbackTarget interface {
+	// toProto converts this callback target to the proto representation.
+	toProto() *commonpb.Callback
+
+	mustEmbedCallbackTarget()
+}
+
+// TemporalCallback is a callback that uses the Temporal system endpoint
+// ("temporal://system") to deliver results. It only requires the callback
+// token provided by the Nexus operation.
+//
+// Use [NewTemporalCallback] to create one.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/client.TemporalCallback]
+type TemporalCallback struct {
+	token string
+}
+
+// NewTemporalCallback creates a [TemporalCallback] with the given token.
+// The token is the Temporal callback token from the Nexus operation.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/client.NewTemporalCallback]
+func NewTemporalCallback(token string) TemporalCallback {
+	return TemporalCallback{token: token}
+}
+
+func (c TemporalCallback) toProto() *commonpb.Callback {
+	return &commonpb.Callback{
+		Variant: &commonpb.Callback_Nexus_{
+			Nexus: &commonpb.Callback_Nexus{
+				Url:    "temporal://system",
+				Header: map[string]string{"Temporal-Callback-Token": c.token},
+			},
+		},
+	}
+}
+
+func (TemporalCallback) mustEmbedCallbackTarget() {}
+
 type (
 	// ClientStartCallbackOptions contains configuration parameters for starting a callback execution.
 	// ID and Callback are required.
@@ -29,10 +79,11 @@ type (
 		//
 		// Mandatory: No default.
 		ID string
-		// Callback - Information on how this callback should be invoked (e.g. its URL and type).
+		// Callback - How this callback should be invoked.
+		// Use [TemporalCallback] for Temporal system callbacks.
 		//
 		// Mandatory: No default.
-		Callback *commonpb.Callback
+		Callback CallbackTarget
 		// ScheduleToCloseTimeout - Total time allowed for the callback to complete.
 		//
 		// Optional: Defaults to server default.
@@ -389,6 +440,7 @@ func (w *workflowClientInterceptor) ExecuteCallback(
 	if in.Options.Callback == nil {
 		return nil, fmt.Errorf("callback is required")
 	}
+	callbackProto := in.Options.Callback.toProto()
 
 	searchAttrs, err := serializeTypedSearchAttributes(in.Options.TypedSearchAttributes.GetUntypedValues())
 	if err != nil {
@@ -413,7 +465,7 @@ func (w *workflowClientInterceptor) ExecuteCallback(
 		Identity:               w.client.identity,
 		RequestId:              uuid.NewString(),
 		CallbackId:             in.Options.ID,
-		Callback:               in.Options.Callback,
+		Callback:               callbackProto,
 		ScheduleToCloseTimeout: durationpb.New(in.Options.ScheduleToCloseTimeout),
 		SearchAttributes:       searchAttrs,
 		Completion:             completion,

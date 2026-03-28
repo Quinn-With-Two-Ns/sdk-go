@@ -985,6 +985,18 @@ type (
 	// NOTE: Experimental
 	TerminateActivityOptions = internal.ClientTerminateActivityOptions
 
+	// CallbackTarget is an interface representing a callback target. Only the SDK
+	// can implement this interface.
+	//
+	// NOTE: Experimental
+	CallbackTarget = internal.CallbackTarget
+
+	// TemporalCallback is a callback that uses the Temporal system endpoint
+	// to deliver results. It only requires the callback token.
+	//
+	// NOTE: Experimental
+	TemporalCallback = internal.TemporalCallback
+
 	// StartCallbackOptions contains configuration parameters for starting a callback execution.
 	//
 	// NOTE: Experimental
@@ -1830,6 +1842,14 @@ func NewAPIKeyDynamicCredentials(apiKeyCallback func(context.Context) (string, e
 // these credentials.
 func NewMTLSCredentials(certificate tls.Certificate) Credentials {
 	return internal.NewMTLSCredentials(certificate)
+}
+
+// NewTemporalCallback creates a [TemporalCallback] with the given token.
+// The token is the Temporal callback token from the Nexus operation.
+//
+// NOTE: Experimental
+func NewTemporalCallback(token string) TemporalCallback {
+	return internal.NewTemporalCallback(token)
 }
 
 // NewWorkflowUpdateServiceTimeoutOrCanceledError creates a new WorkflowUpdateServiceTimeoutOrCanceledError.

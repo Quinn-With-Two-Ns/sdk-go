@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/nexus-rpc/sdk-go/nexus"
-	commonpb "go.temporal.io/api/common/v1"
 	nexuspb "go.temporal.io/api/nexus/v1"
 	"go.temporal.io/api/operatorservice/v1"
 	"go.temporal.io/sdk/activity"
@@ -119,7 +118,6 @@ const callbackHeaderKey = "_nexus-callback-info"
 
 // callbackHeaderValue is serialized into the activity header.
 type callbackHeaderValue struct {
-	URL           string `json:"url"`
 	CallbackToken string `json:"callback_token"`
 }
 
@@ -146,14 +144,11 @@ func (o *greetOperation) Start(ctx context.Context, input GreetInput, opts nexus
 	c := temporalnexus.GetClient(ctx)
 	opInfo := temporalnexus.GetOperationInfo(ctx)
 
-	// Build the Callback proto from the Nexus StartOperationOptions.
-	if opts.CallbackURL != "" {
-		cb := callbackHeaderValue{
-			URL:           opts.CallbackURL,
-			CallbackToken: opts.CallbackHeader.Get("Temporal-Callback-Token"),
-		}
-		ctx = context.WithValue(ctx, callbackCtxKey{}, cb)
-
+	// Extract the callback token from the Nexus StartOperationOptions.
+	if token := opts.CallbackHeader.Get("Temporal-Callback-Token"); token != "" {
+		ctx = context.WithValue(ctx, callbackCtxKey{}, callbackHeaderValue{
+			CallbackToken: token,
+		})
 	}
 
 	// Attach callback info to context so the client interceptor can
@@ -202,12 +197,7 @@ func (o *nexusCallbackClientOutbound) ExecuteActivity(
 ) (client.ActivityHandle, error) {
 	// If callback info is in the context, serialize it into the header.
 	if info, ok := ctx.Value(callbackCtxKey{}).(callbackHeaderValue); ok {
-		fmt.Println("Propagating callback info:", info)
-		val := callbackHeaderValue{
-			URL:           info.URL,
-			CallbackToken: info.CallbackToken,
-		}
-		payload, err := converter.GetDefaultDataConverter().ToPayload(val)
+		payload, err := converter.GetDefaultDataConverter().ToPayload(info)
 		if err == nil {
 			header := interceptor.Header(ctx)
 			if header != nil {
@@ -274,7 +264,7 @@ func (a *nexusCallbackActivityInbound) ExecuteActivity(
 	actInfo := a.outbound.GetInfo(ctx)
 	_, cbErr := c.ExecuteCallback(ctx, client.StartCallbackOptions{
 		ID:                     actInfo.ActivityID + "-callback",
-		Callback:               cb,
+		Callback:               client.NewTemporalCallback(cb.CallbackToken),
 		ScheduleToCloseTimeout: 1 * time.Minute,
 	}, completion)
 	if cbErr != nil {
@@ -287,7 +277,7 @@ func (a *nexusCallbackActivityInbound) ExecuteActivity(
 
 // extractCallbackFromHeaders reads the callback info from the activity's
 // propagated headers, if present.
-func (a *nexusCallbackActivityInbound) extractCallbackFromHeaders(ctx context.Context) *commonpb.Callback {
+func (a *nexusCallbackActivityInbound) extractCallbackFromHeaders(ctx context.Context) *callbackHeaderValue {
 	header := interceptor.Header(ctx)
 	if header == nil {
 		return nil
@@ -300,14 +290,7 @@ func (a *nexusCallbackActivityInbound) extractCallbackFromHeaders(ctx context.Co
 	if err := converter.GetDefaultDataConverter().FromPayload(payload, &val); err != nil {
 		return nil
 	}
-	return &commonpb.Callback{
-		Variant: &commonpb.Callback_Nexus_{
-			Nexus: &commonpb.Callback_Nexus{
-				Url:    val.URL,
-				Header: map[string]string{"Temporal-Callback-Token": val.CallbackToken},
-			},
-		},
-	}
+	return &val
 }
 
 // --- Worker Setup ---
