@@ -593,27 +593,20 @@ func (p *proxyClientOutbound) PollActivityResult(
 func (p *proxyClientOutbound) ExecuteCallback(
 	ctx context.Context,
 	in *interceptor.ClientExecuteCallbackInput,
-) (ret client.CallbackHandle, err error) {
+) (ret client.CallbackExecutionHandle, err error) {
 	vals := p.invoke(ctx, in)
-	ret, _ = vals[0].Interface().(client.CallbackHandle)
+	ret, _ = vals[0].Interface().(client.CallbackExecutionHandle)
 	err, _ = vals[1].Interface().(error)
 	return
 }
 
-func (p *proxyClientOutbound) GetCallbackHandle(
-	in *interceptor.ClientGetCallbackHandleInput,
-) (ret client.CallbackHandle) {
-	ret, _ = p.invoke(in)[0].Interface().(client.CallbackHandle)
+func (p *proxyClientOutbound) GetCallbackExecutionHandle(
+	in *interceptor.ClientGetCallbackExecutionHandleInput,
+) (ret client.CallbackExecutionHandle) {
+	ret, _ = p.invoke(in)[0].Interface().(client.CallbackExecutionHandle)
 	return
 }
 
-func (p *proxyClientOutbound) CancelCallback(
-	ctx context.Context,
-	in *interceptor.ClientCancelCallbackInput,
-) (err error) {
-	err, _ = p.invoke(ctx, in)[0].Interface().(error)
-	return
-}
 
 func (p *proxyClientOutbound) TerminateCallback(
 	ctx context.Context,

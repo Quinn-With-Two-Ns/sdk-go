@@ -533,33 +533,34 @@ type (
 		// NOTE: Experimental
 		CountActivities(ctx context.Context, options ClientCountActivitiesOptions) (*ClientCountActivitiesResult, error)
 
-		// ExecuteCallback starts a standalone callback execution and returns a CallbackHandle.
-		// The callback delivers a Nexus completion to the specified callback URL.
-		//
-		// The completion parameter accepts either a success value (any type, serialized as a payload)
-		// or an error (converted to a failure). A nil completion is treated as success with an empty payload.
+		// CompleteNexusOperation completes an async Nexus operation with a success result.
+		// It starts the callback execution and waits for it to complete.
 		//
 		// NOTE: Experimental
-		ExecuteCallback(ctx context.Context, options ClientStartCallbackOptions, completion any) (ClientCallbackHandle, error)
+		CompleteNexusOperation(ctx context.Context, callbackToken string, result any, options ClientCompleteNexusOperationOptions) error
 
-		// GetCallbackHandle creates a handle to the referenced callback.
+		// FailNexusOperation fails an async Nexus operation with an error.
+		// It starts the callback execution and waits for it to complete.
 		//
 		// NOTE: Experimental
-		GetCallbackHandle(options ClientGetCallbackHandleOptions) ClientCallbackHandle
+		FailNexusOperation(ctx context.Context, callbackToken string, failure error, options ClientCompleteNexusOperationOptions) error
 
-		// ListCallbacks lists callback executions based on query.
-		//
-		// Currently, all errors are returned in the iterator and not the base level error.
+		// StartCompleteNexusOperation starts completing an async Nexus operation and returns
+		// a handle that can be used to wait for the completion, describe, or terminate it.
 		//
 		// NOTE: Experimental
-		ListCallbacks(ctx context.Context, options ClientListCallbacksOptions) (ClientListCallbacksResult, error)
+		StartCompleteNexusOperation(ctx context.Context, callbackToken string, result any, options ClientCompleteNexusOperationOptions) (ClientCallbackExecutionHandle, error)
 
-		// CountCallbacks counts callback executions based on query. The result
-		// includes the total count and optionally grouped counts if the query includes
-		// a GROUP BY clause.
+		// StartFailNexusOperation starts failing an async Nexus operation and returns
+		// a handle that can be used to wait for the completion, describe, or terminate it.
 		//
 		// NOTE: Experimental
-		CountCallbacks(ctx context.Context, options ClientCountCallbacksOptions) (*ClientCountCallbacksResult, error)
+		StartFailNexusOperation(ctx context.Context, callbackToken string, failure error, options ClientCompleteNexusOperationOptions) (ClientCallbackExecutionHandle, error)
+
+		// GetCallbackExecutionHandle creates a handle to the referenced callback execution.
+		//
+		// NOTE: Experimental
+		GetCallbackExecutionHandle(options ClientGetCallbackExecutionHandleOptions) ClientCallbackExecutionHandle
 
 		// WorkflowService provides access to the underlying gRPC service. This should only be used for advanced use cases
 		// that cannot be accomplished via other Client methods. Unlike calls to other Client methods, calls directly to the

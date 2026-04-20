@@ -3,7 +3,6 @@ package internal
 import (
 	"context"
 	"fmt"
-	"iter"
 	"time"
 
 	"github.com/google/uuid"
@@ -17,73 +16,18 @@ import (
 
 const pollCallbackTimeout = 60 * time.Second
 
-// CallbackTarget is an interface representing a callback target. Only the SDK
-// can implement this interface — the unexported method prevents external
-// implementations.
-//
-// NOTE: Experimental
-//
-// Exposed as: [go.temporal.io/sdk/client.CallbackTarget]
-type CallbackTarget interface {
-	// toProto converts this callback target to the proto representation.
-	toProto() *commonpb.Callback
-
-	mustEmbedCallbackTarget()
-}
-
-// TemporalCallback is a callback that uses the Temporal system endpoint
-// ("temporal://system") to deliver results. It only requires the callback
-// token provided by the Nexus operation.
-//
-// Use [NewTemporalCallback] to create one.
-//
-// NOTE: Experimental
-//
-// Exposed as: [go.temporal.io/sdk/client.TemporalCallback]
-type TemporalCallback struct {
-	token string
-}
-
-// NewTemporalCallback creates a [TemporalCallback] with the given token.
-// The token is the Temporal callback token from the Nexus operation.
-//
-// NOTE: Experimental
-//
-// Exposed as: [go.temporal.io/sdk/client.NewTemporalCallback]
-func NewTemporalCallback(token string) TemporalCallback {
-	return TemporalCallback{token: token}
-}
-
-func (c TemporalCallback) toProto() *commonpb.Callback {
-	return &commonpb.Callback{
-		Variant: &commonpb.Callback_Nexus_{
-			Nexus: &commonpb.Callback_Nexus{
-				Url:    "temporal://system",
-				Header: map[string]string{"Temporal-Callback-Token": c.token},
-			},
-		},
-	}
-}
-
-func (TemporalCallback) mustEmbedCallbackTarget() {}
-
 type (
-	// ClientStartCallbackOptions contains configuration parameters for starting a callback execution.
-	// ID and Callback are required.
+	// ClientCompleteNexusOperationOptions contains configuration parameters for completing an async Nexus operation.
 	//
 	// NOTE: Experimental
 	//
-	// Exposed as: [go.temporal.io/sdk/client.StartCallbackOptions]
-	ClientStartCallbackOptions struct {
+	// Exposed as: [go.temporal.io/sdk/client.CompleteNexusOperationOptions]
+	ClientCompleteNexusOperationOptions struct {
 		// ID - The unique identifier of the callback within its namespace.
+		// If not set, a UUID will be generated.
 		//
-		// Mandatory: No default.
+		// Optional.
 		ID string
-		// Callback - How this callback should be invoked.
-		// Use [TemporalCallback] for Temporal system callbacks.
-		//
-		// Mandatory: No default.
-		Callback CallbackTarget
 		// ScheduleToCloseTimeout - Total time allowed for the callback to complete.
 		//
 		// Optional: Defaults to server default.
@@ -92,93 +36,28 @@ type (
 		//
 		// Optional: default to none.
 		TypedSearchAttributes SearchAttributes
-		// Links - Links to be associated with the callback.
-		//
-		// Optional: default to none.
-		Links []*commonpb.Link
 	}
 
-	// ClientGetCallbackHandleOptions contains input for GetCallbackHandle call.
-	// CallbackID is required.
-	//
-	// NOTE: Experimental
-	//
-	// Exposed as: [go.temporal.io/sdk/client.GetCallbackHandleOptions]
-	ClientGetCallbackHandleOptions struct {
-		CallbackID string
-	}
-
-	// ClientListCallbacksOptions contains input for ListCallbacks call.
-	//
-	// NOTE: Experimental
-	//
-	// Exposed as: [go.temporal.io/sdk/client.ListCallbacksOptions]
-	ClientListCallbacksOptions struct {
-		Query string
-	}
-
-	// ClientListCallbacksResult contains the result of the ListCallbacks call.
-	//
-	// NOTE: Experimental
-	//
-	// Exposed as: [go.temporal.io/sdk/client.ListCallbacksResult]
-	ClientListCallbacksResult struct {
-		Results iter.Seq2[*ClientCallbackExecutionInfo, error]
-	}
-
-	// ClientCountCallbacksOptions contains input for CountCallbacks call.
-	//
-	// NOTE: Experimental
-	//
-	// Exposed as: [go.temporal.io/sdk/client.CountCallbacksOptions]
-	ClientCountCallbacksOptions struct {
-		Query string
-	}
-
-	// ClientCountCallbacksResult contains the result of the CountCallbacks call.
-	//
-	// NOTE: Experimental
-	//
-	// Exposed as: [go.temporal.io/sdk/client.CountCallbacksResult]
-	ClientCountCallbacksResult struct {
-		Count  int64
-		Groups []ClientCountCallbacksAggregationGroup
-	}
-
-	// ClientCountCallbacksAggregationGroup contains groups of callbacks if
-	// CountCallbackExecutions is grouped by a field.
-	//
-	// NOTE: Experimental
-	//
-	// Exposed as: [go.temporal.io/sdk/client.CountCallbacksAggregationGroup]
-	ClientCountCallbacksAggregationGroup struct {
-		GroupValues []any
-		Count       int64
-	}
-
-	// ClientCallbackHandle represents a running or completed standalone callback execution.
-	// It can be used to wait for completion, describe, cancel, or terminate the callback.
+	// ClientCallbackExecutionHandle represents a running or completed standalone callback execution.
+	// It can be used to wait for completion, describe, or terminate the callback.
 	//
 	// Methods may be added to this interface; implementing it directly is discouraged.
 	//
 	// NOTE: Experimental
 	//
-	// Exposed as: [go.temporal.io/sdk/client.CallbackHandle]
-	ClientCallbackHandle interface {
+	// Exposed as: [go.temporal.io/sdk/client.CallbackExecutionHandle]
+	ClientCallbackExecutionHandle interface {
 		// GetID returns the callback ID.
 		GetID() string
 		// Get waits until the callback finishes. Returns nil on success, or the failure as an error.
-		// Note: unlike activities, successful callbacks have no result payload.
 		Get(ctx context.Context) error
 		// Describe returns detailed information about the callback execution.
 		Describe(ctx context.Context, options ClientDescribeCallbackOptions) (*ClientCallbackExecutionDescription, error)
-		// Cancel requests cancellation of the callback.
-		Cancel(ctx context.Context, options ClientCancelCallbackOptions) error
 		// Terminate terminates the callback.
 		Terminate(ctx context.Context, options ClientTerminateCallbackOptions) error
 	}
 
-	// ClientDescribeCallbackOptions contains options for ClientCallbackHandle.Describe call.
+	// ClientDescribeCallbackOptions contains options for ClientCallbackExecutionHandle.Describe call.
 	// For future compatibility, currently unused.
 	//
 	// NOTE: Experimental
@@ -186,7 +65,7 @@ type (
 	// Exposed as: [go.temporal.io/sdk/client.DescribeCallbackOptions]
 	ClientDescribeCallbackOptions struct{}
 
-	// ClientCancelCallbackOptions contains options for ClientCallbackHandle.Cancel call.
+	// ClientCancelCallbackOptions contains options for ClientCallbackExecutionHandle.Cancel call.
 	//
 	// NOTE: Experimental
 	//
@@ -196,7 +75,7 @@ type (
 		Reason string
 	}
 
-	// ClientTerminateCallbackOptions contains options for ClientCallbackHandle.Terminate call.
+	// ClientTerminateCallbackOptions contains options for ClientCallbackExecutionHandle.Terminate call.
 	//
 	// NOTE: Experimental
 	//
@@ -207,25 +86,21 @@ type (
 	}
 
 	// ClientCallbackExecutionInfo contains information about a callback execution.
-	// This is returned by ListCallbacks and embedded in ClientCallbackExecutionDescription.
 	//
 	// NOTE: Experimental
 	//
 	// Exposed as: [go.temporal.io/sdk/client.CallbackExecutionInfo]
 	ClientCallbackExecutionInfo struct {
-		// Raw PB message this struct was built from. This field is nil in the result of ClientCallbackHandle.Describe call - use
-		// ClientCallbackExecutionDescription.RawExecutionInfo instead.
-		RawExecutionListInfo     *callbackpb.CallbackExecutionListInfo
-		CallbackID               string
-		State                    enumspb.CallbackState
-		CreateTime               time.Time
-		CloseTime                time.Time
-		TypedSearchAttributes    SearchAttributes
-		StateTransitionCount     int64
+		CallbackID            string
+		State                 enumspb.CallbackState
+		CreateTime            time.Time
+		CloseTime             time.Time
+		TypedSearchAttributes SearchAttributes
+		StateTransitionCount  int64
 	}
 
 	// ClientCallbackExecutionDescription contains detailed information about a callback execution.
-	// This is returned by ClientCallbackHandle.Describe.
+	// This is returned by ClientCallbackExecutionHandle.Describe.
 	//
 	// NOTE: Experimental
 	//
@@ -240,12 +115,11 @@ type (
 		NextAttemptScheduleTime time.Time
 		BlockedReason           string
 		ScheduleToCloseTimeout  time.Duration
-		Links                   []*commonpb.Link
 		failureConverter        converter.FailureConverter
 		inboundPayloadVisitor   PayloadVisitor
 	}
 
-	// clientCallbackHandleImpl is the default implementation of ClientCallbackHandle.
+	// clientCallbackHandleImpl is the default implementation of ClientCallbackExecutionHandle.
 	clientCallbackHandleImpl struct {
 		client     *WorkflowClient
 		id         string
@@ -278,7 +152,6 @@ func (h *clientCallbackHandleImpl) Get(ctx context.Context) error {
 		return err
 	}
 
-	// repeatedly poll, the loop repeats until there's an outcome
 	for {
 		resp, err := h.client.interceptor.PollCallbackResult(ctx, &ClientPollCallbackResultInput{
 			CallbackID: h.id,
@@ -306,16 +179,6 @@ func (h *clientCallbackHandleImpl) Describe(ctx context.Context, options ClientD
 	return out.Description, nil
 }
 
-func (h *clientCallbackHandleImpl) Cancel(ctx context.Context, options ClientCancelCallbackOptions) error {
-	if err := h.client.ensureInitialized(ctx); err != nil {
-		return err
-	}
-	return h.client.interceptor.CancelCallback(ctx, &ClientCancelCallbackInput{
-		CallbackID: h.id,
-		Reason:     options.Reason,
-	})
-}
-
 func (h *clientCallbackHandleImpl) Terminate(ctx context.Context, options ClientTerminateCallbackOptions) error {
 	if err := h.client.ensureInitialized(ctx); err != nil {
 		return err
@@ -326,154 +189,117 @@ func (h *clientCallbackHandleImpl) Terminate(ctx context.Context, options Client
 	})
 }
 
-func (wc *WorkflowClient) ExecuteCallback(ctx context.Context, options ClientStartCallbackOptions, completion any) (ClientCallbackHandle, error) {
+// CompleteNexusOperation completes an async Nexus operation with a success result.
+func (wc *WorkflowClient) CompleteNexusOperation(ctx context.Context, callbackToken string, result any, options ClientCompleteNexusOperationOptions) error {
+	handle, err := wc.StartCompleteNexusOperation(ctx, callbackToken, result, options)
+	if err != nil {
+		return err
+	}
+	return handle.Get(ctx)
+}
+
+// FailNexusOperation fails an async Nexus operation with an error.
+func (wc *WorkflowClient) FailNexusOperation(ctx context.Context, callbackToken string, failure error, options ClientCompleteNexusOperationOptions) error {
+	handle, err := wc.StartFailNexusOperation(ctx, callbackToken, failure, options)
+	if err != nil {
+		return err
+	}
+	return handle.Get(ctx)
+}
+
+// StartCompleteNexusOperation starts completing an async Nexus operation and returns a handle.
+func (wc *WorkflowClient) StartCompleteNexusOperation(ctx context.Context, callbackToken string, result any, options ClientCompleteNexusOperationOptions) (ClientCallbackExecutionHandle, error) {
 	if err := wc.ensureInitialized(ctx); err != nil {
 		return nil, err
 	}
-
 	return wc.interceptor.ExecuteCallback(ctx, &ClientExecuteCallbackInput{
-		Options:    &options,
-		Completion: completion,
+		Options:       &options,
+		CallbackToken: callbackToken,
+		Result:        result,
 	})
 }
 
-func (wc *WorkflowClient) GetCallbackHandle(options ClientGetCallbackHandleOptions) ClientCallbackHandle {
-	return wc.interceptor.GetCallbackHandle((*ClientGetCallbackHandleInput)(&options))
-}
-
-func (wc *WorkflowClient) ListCallbacks(ctx context.Context, options ClientListCallbacksOptions) (ClientListCallbacksResult, error) {
-	return ClientListCallbacksResult{
-		Results: func(yield func(*ClientCallbackExecutionInfo, error) bool) {
-			if err := wc.ensureInitialized(ctx); err != nil {
-				yield(nil, err)
-				return
-			}
-
-			request := &workflowservice.ListCallbackExecutionsRequest{
-				Namespace: wc.namespace,
-				Query:     options.Query,
-			}
-
-			for {
-				resp, err := wc.getListCallbacksPage(ctx, request)
-				if err != nil {
-					yield(nil, err)
-					return
-				}
-
-				for _, ex := range resp.Executions {
-					if !yield(&ClientCallbackExecutionInfo{
-						RawExecutionListInfo:  ex,
-						CallbackID:           ex.CallbackId,
-						State:                ex.State,
-						CreateTime:           ex.CreateTime.AsTime(),
-						CloseTime:            ex.CloseTime.AsTime(),
-						TypedSearchAttributes: convertToTypedSearchAttributes(wc.logger, ex.SearchAttributes.GetIndexedFields()),
-						StateTransitionCount: ex.StateTransitionCount,
-					}, nil) {
-						return
-					}
-				}
-
-				if resp.NextPageToken != nil {
-					request.NextPageToken = resp.NextPageToken
-				} else {
-					return
-				}
-			}
-		},
-	}, nil
-}
-
-func (wc *WorkflowClient) getListCallbacksPage(ctx context.Context, request *workflowservice.ListCallbackExecutionsRequest) (*workflowservice.ListCallbackExecutionsResponse, error) {
-	grpcCtx, cancel := newGRPCContext(ctx, defaultGrpcRetryParameters(ctx))
-	defer cancel()
-
-	return wc.WorkflowService().ListCallbackExecutions(grpcCtx, request)
-}
-
-func (wc *WorkflowClient) CountCallbacks(ctx context.Context, options ClientCountCallbacksOptions) (*ClientCountCallbacksResult, error) {
-	grpcCtx, cancel := newGRPCContext(ctx, defaultGrpcRetryParameters(ctx))
-	defer cancel()
-
-	request := &workflowservice.CountCallbackExecutionsRequest{
-		Namespace: wc.namespace,
-		Query:     options.Query,
-	}
-	resp, err := wc.WorkflowService().CountCallbackExecutions(grpcCtx, request)
-	if err != nil {
+// StartFailNexusOperation starts failing an async Nexus operation and returns a handle.
+func (wc *WorkflowClient) StartFailNexusOperation(ctx context.Context, callbackToken string, failure error, options ClientCompleteNexusOperationOptions) (ClientCallbackExecutionHandle, error) {
+	if err := wc.ensureInitialized(ctx); err != nil {
 		return nil, err
 	}
+	return wc.interceptor.ExecuteCallback(ctx, &ClientExecuteCallbackInput{
+		Options:       &options,
+		CallbackToken: callbackToken,
+		Failure:       failure,
+	})
+}
 
-	groups := make([]ClientCountCallbacksAggregationGroup, len(resp.Groups))
-	for i, group := range resp.Groups {
-		groupValues := make([]any, len(group.GroupValues))
-		for j, groupValue := range group.GroupValues {
-			// should never fail, and if it does, leaving nil behind
-			_ = converter.GetDefaultDataConverter().FromPayload(groupValue, &groupValues[j])
-		}
-		groups[i] = ClientCountCallbacksAggregationGroup{
-			GroupValues: groupValues,
-			Count:       group.Count,
-		}
-	}
+func (wc *WorkflowClient) GetCallbackExecutionHandle(options ClientGetCallbackExecutionHandleOptions) ClientCallbackExecutionHandle {
+	return wc.interceptor.GetCallbackExecutionHandle((*ClientGetCallbackExecutionHandleInput)(&options))
+}
 
-	return &ClientCountCallbacksResult{
-		Count:  resp.Count,
-		Groups: groups,
-	}, nil
+// ClientGetCallbackExecutionHandleOptions contains input for GetCallbackExecutionHandle call.
+//
+// NOTE: Experimental
+//
+// Exposed as: [go.temporal.io/sdk/client.GetCallbackExecutionHandleOptions]
+type ClientGetCallbackExecutionHandleOptions struct {
+	CallbackID string
 }
 
 func (w *workflowClientInterceptor) ExecuteCallback(
 	ctx context.Context,
 	in *ClientExecuteCallbackInput,
-) (ClientCallbackHandle, error) {
+) (ClientCallbackExecutionHandle, error) {
 	ctx = contextWithNewHeader(ctx)
 	dataConverter := WithContext(ctx, w.client.dataConverter)
 	if dataConverter == nil {
 		dataConverter = converter.GetDefaultDataConverter()
 	}
 
-	if in.Options.ID == "" {
-		return nil, fmt.Errorf("callback ID is required")
+	callbackID := in.Options.ID
+	if callbackID == "" {
+		callbackID = uuid.NewString()
 	}
-	if in.Options.Callback == nil {
-		return nil, fmt.Errorf("callback is required")
+
+	callbackProto := &commonpb.Callback{
+		Variant: &commonpb.Callback_Nexus_{
+			Nexus: &commonpb.Callback_Nexus{
+				Url:    "temporal://system",
+				Header: map[string]string{"Temporal-Callback-Token": in.CallbackToken},
+			},
+		},
 	}
-	callbackProto := in.Options.Callback.toProto()
 
 	searchAttrs, err := serializeTypedSearchAttributes(in.Options.TypedSearchAttributes.GetUntypedValues())
 	if err != nil {
 		return nil, err
 	}
 
-	// Build the completion proto. A nil completion is treated as success with nil payload.
-	// If completion is an error, convert to failure. Otherwise, serialize as success payload.
+	// Build the completion proto from the explicit Result or Failure field.
 	completion := &callbackpb.CallbackExecutionCompletion{}
-	if completionErr, ok := in.Completion.(error); ok {
-		completion.Failure = w.client.failureConverter.ErrorToFailure(completionErr)
-	} else if in.Completion != nil {
-		payload, err := dataConverter.ToPayload(in.Completion)
+	if in.Failure != nil {
+		completion.Result = &callbackpb.CallbackExecutionCompletion_Failure{
+			Failure: w.client.failureConverter.ErrorToFailure(in.Failure),
+		}
+	} else {
+		payload, err := dataConverter.ToPayload(in.Result)
 		if err != nil {
 			return nil, err
 		}
-		completion.Success = payload
+		completion.Result = &callbackpb.CallbackExecutionCompletion_Success{
+			Success: payload,
+		}
 	}
 
 	request := &workflowservice.StartCallbackExecutionRequest{
 		Namespace:              w.client.namespace,
 		Identity:               w.client.identity,
 		RequestId:              uuid.NewString(),
-		CallbackId:             in.Options.ID,
+		CallbackId:             callbackID,
 		Callback:               callbackProto,
 		ScheduleToCloseTimeout: durationpb.New(in.Options.ScheduleToCloseTimeout),
 		SearchAttributes:       searchAttrs,
-		Completion:             completion,
-		Links:                  in.Options.Links,
-	}
-
-	if request.Header, err = headerPropagated(ctx, w.client.contextPropagators); err != nil {
-		return nil, err
+		Input: &workflowservice.StartCallbackExecutionRequest_Completion{
+			Completion: completion,
+		},
 	}
 
 	if err := visitProtoPayloads(ctx, w.client.outboundPayloadVisitor, request); err != nil {
@@ -490,13 +316,13 @@ func (w *workflowClientInterceptor) ExecuteCallback(
 
 	return &clientCallbackHandleImpl{
 		client: w.client,
-		id:     in.Options.ID,
+		id:     callbackID,
 	}, nil
 }
 
-func (w *workflowClientInterceptor) GetCallbackHandle(
-	in *ClientGetCallbackHandleInput,
-) ClientCallbackHandle {
+func (w *workflowClientInterceptor) GetCallbackExecutionHandle(
+	in *ClientGetCallbackExecutionHandleInput,
+) ClientCallbackExecutionHandle {
 	return &clientCallbackHandleImpl{
 		client: w.client,
 		id:     in.CallbackID,
@@ -564,13 +390,12 @@ func (w *workflowClientInterceptor) DescribeCallback(
 	return &ClientDescribeCallbackOutput{
 		Description: &ClientCallbackExecutionDescription{
 			ClientCallbackExecutionInfo: ClientCallbackExecutionInfo{
-				RawExecutionListInfo:  nil,
-				CallbackID:           info.CallbackId,
-				State:                info.State,
-				CreateTime:           info.CreateTime.AsTime(),
-				CloseTime:            info.CloseTime.AsTime(),
+				CallbackID:            info.CallbackId,
+				State:                 info.State,
+				CreateTime:            info.CreateTime.AsTime(),
+				CloseTime:             info.CloseTime.AsTime(),
 				TypedSearchAttributes: convertToTypedSearchAttributes(w.client.logger, info.SearchAttributes.GetIndexedFields()),
-				StateTransitionCount: info.StateTransitionCount,
+				StateTransitionCount:  info.StateTransitionCount,
 			},
 			RawExecutionInfo:        info,
 			Callback:                info.Callback,
@@ -579,29 +404,10 @@ func (w *workflowClientInterceptor) DescribeCallback(
 			NextAttemptScheduleTime: info.NextAttemptScheduleTime.AsTime(),
 			BlockedReason:           info.BlockedReason,
 			ScheduleToCloseTimeout:  info.ScheduleToCloseTimeout.AsDuration(),
-			Links:                   info.Links,
 			failureConverter:        w.client.failureConverter,
 			inboundPayloadVisitor:   w.client.inboundPayloadVisitor,
 		},
 	}, nil
-}
-
-func (w *workflowClientInterceptor) CancelCallback(
-	ctx context.Context,
-	in *ClientCancelCallbackInput,
-) error {
-	grpcCtx, cancel := newGRPCContext(ctx, defaultGrpcRetryParameters(ctx))
-	defer cancel()
-
-	request := &workflowservice.RequestCancelCallbackExecutionRequest{
-		Namespace:  w.client.namespace,
-		CallbackId: in.CallbackID,
-		Identity:   w.client.identity,
-		RequestId:  uuid.NewString(),
-		Reason:     in.Reason,
-	}
-	_, err := w.client.WorkflowService().RequestCancelCallbackExecution(grpcCtx, request)
-	return err
 }
 
 func (w *workflowClientInterceptor) TerminateCallback(
@@ -621,4 +427,3 @@ func (w *workflowClientInterceptor) TerminateCallback(
 	_, err := w.client.WorkflowService().TerminateCallbackExecution(grpcCtx, request)
 	return err
 }
-

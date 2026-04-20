@@ -641,27 +641,17 @@ func (c *ClientOutboundInterceptorBase) PollActivityResult(
 func (c *ClientOutboundInterceptorBase) ExecuteCallback(
 	ctx context.Context,
 	in *ClientExecuteCallbackInput,
-) (ClientCallbackHandle, error) {
+) (ClientCallbackExecutionHandle, error) {
 	return c.Next.ExecuteCallback(ctx, in)
 }
 
-// GetCallbackHandle implements ClientOutboundInterceptor.GetCallbackHandle.
+// GetCallbackExecutionHandle implements ClientOutboundInterceptor.GetCallbackExecutionHandle.
 //
 // NOTE: Experimental
-func (c *ClientOutboundInterceptorBase) GetCallbackHandle(
-	in *ClientGetCallbackHandleInput,
-) ClientCallbackHandle {
-	return c.Next.GetCallbackHandle(in)
-}
-
-// CancelCallback implements ClientOutboundInterceptor.CancelCallback.
-//
-// NOTE: Experimental
-func (c *ClientOutboundInterceptorBase) CancelCallback(
-	ctx context.Context,
-	in *ClientCancelCallbackInput,
-) error {
-	return c.Next.CancelCallback(ctx, in)
+func (c *ClientOutboundInterceptorBase) GetCallbackExecutionHandle(
+	in *ClientGetCallbackExecutionHandleInput,
+) ClientCallbackExecutionHandle {
+	return c.Next.GetCallbackExecutionHandle(in)
 }
 
 // TerminateCallback implements ClientOutboundInterceptor.TerminateCallback.

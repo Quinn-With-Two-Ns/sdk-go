@@ -250,11 +250,11 @@ type ClientPollActivityResultOutput = internal.ClientPollActivityResultOutput
 // NOTE: Experimental
 type ClientExecuteCallbackInput = internal.ClientExecuteCallbackInput
 
-// ClientGetCallbackHandleInput is the input to
-// ClientOutboundInterceptor.GetCallbackHandle.
+// ClientGetCallbackExecutionHandleInput is the input to
+// ClientOutboundInterceptor.GetCallbackExecutionHandle.
 //
 // NOTE: Experimental
-type ClientGetCallbackHandleInput = internal.ClientGetCallbackHandleInput
+type ClientGetCallbackExecutionHandleInput = internal.ClientGetCallbackExecutionHandleInput
 
 // ClientCancelCallbackInput is the input to
 // ClientOutboundInterceptor.CancelCallback.

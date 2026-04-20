@@ -1294,98 +1294,115 @@ func (_m *Client) CountActivities(ctx context.Context, options client.CountActiv
 	return r0, r1
 }
 
-func (_m *Client) ExecuteCallback(ctx context.Context, options client.StartCallbackOptions, completion any) (client.CallbackHandle, error) {
-	ret := _m.Called(ctx, options, completion)
+func (_m *Client) FailNexusOperation(ctx context.Context, callbackToken string, failure error, options client.CompleteNexusOperationOptions) error {
+	ret := _m.Called(ctx, callbackToken, failure, options)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ExecuteCallback")
+		panic("no return value specified for FailNexusOperation")
 	}
 
-	var r0 client.CallbackHandle
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, client.StartCallbackOptions, any) (client.CallbackHandle, error)); ok {
-		return rf(ctx, options, completion)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, client.StartCallbackOptions, any) client.CallbackHandle); ok {
-		r0 = rf(ctx, options, completion)
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, error, client.CompleteNexusOperationOptions) error); ok {
+		r0 = rf(ctx, callbackToken, failure, options)
 	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(client.CallbackHandle)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, client.StartCallbackOptions, any) error); ok {
-		r1 = rf(ctx, options, completion)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-func (_m *Client) GetCallbackHandle(options client.GetCallbackHandleOptions) client.CallbackHandle {
-	ret := _m.Called(options)
-
-	if len(ret) == 0 {
-		panic("no return value specified for GetCallbackHandle")
-	}
-
-	var r0 client.CallbackHandle
-	if rf, ok := ret.Get(0).(func(client.GetCallbackHandleOptions) client.CallbackHandle); ok {
-		r0 = rf(options)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(client.CallbackHandle)
-		}
+		r0 = ret.Error(0)
 	}
 
 	return r0
 }
 
-func (_m *Client) ListCallbacks(ctx context.Context, options client.ListCallbacksOptions) (client.ListCallbacksResult, error) {
-	ret := _m.Called(ctx, options)
+func (_m *Client) CompleteNexusOperation(ctx context.Context, callbackToken string, result any, options client.CompleteNexusOperationOptions) error {
+	ret := _m.Called(ctx, callbackToken, result, options)
 
 	if len(ret) == 0 {
-		panic("no return value specified for ListCallbacks")
+		panic("no return value specified for CompleteNexusOperation")
 	}
 
-	var r0 client.ListCallbacksResult
-	if rf, ok := ret.Get(0).(func(context.Context, client.ListCallbacksOptions) client.ListCallbacksResult); ok {
-		r0 = rf(ctx, options)
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, any, client.CompleteNexusOperationOptions) error); ok {
+		r0 = rf(ctx, callbackToken, result, options)
 	} else {
-		r0 = ret.Get(0).(client.ListCallbacksResult)
+		r0 = ret.Error(0)
 	}
 
-	return r0, nil
+	return r0
 }
 
-func (_m *Client) CountCallbacks(ctx context.Context, options client.CountCallbacksOptions) (*client.CountCallbacksResult, error) {
-	ret := _m.Called(ctx, options)
+func (_m *Client) StartCompleteNexusOperation(ctx context.Context, callbackToken string, result any, options client.CompleteNexusOperationOptions) (client.CallbackExecutionHandle, error) {
+	ret := _m.Called(ctx, callbackToken, result, options)
 
 	if len(ret) == 0 {
-		panic("no return value specified for CountCallbacks")
+		panic("no return value specified for StartCompleteNexusOperation")
 	}
 
-	var r0 *client.CountCallbacksResult
+	var r0 client.CallbackExecutionHandle
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, client.CountCallbacksOptions) (*client.CountCallbacksResult, error)); ok {
-		return rf(ctx, options)
+	if rf, ok := ret.Get(0).(func(context.Context, string, any, client.CompleteNexusOperationOptions) (client.CallbackExecutionHandle, error)); ok {
+		return rf(ctx, callbackToken, result, options)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, client.CountCallbacksOptions) *client.CountCallbacksResult); ok {
-		r0 = rf(ctx, options)
+	if rf, ok := ret.Get(0).(func(context.Context, string, any, client.CompleteNexusOperationOptions) client.CallbackExecutionHandle); ok {
+		r0 = rf(ctx, callbackToken, result, options)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*client.CountCallbacksResult)
+			r0 = ret.Get(0).(client.CallbackExecutionHandle)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, client.CountCallbacksOptions) error); ok {
-		r1 = rf(ctx, options)
+	if rf, ok := ret.Get(1).(func(context.Context, string, any, client.CompleteNexusOperationOptions) error); ok {
+		r1 = rf(ctx, callbackToken, result, options)
 	} else {
 		r1 = ret.Error(1)
 	}
 
 	return r0, r1
+}
+
+func (_m *Client) StartFailNexusOperation(ctx context.Context, callbackToken string, failure error, options client.CompleteNexusOperationOptions) (client.CallbackExecutionHandle, error) {
+	ret := _m.Called(ctx, callbackToken, failure, options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for StartFailNexusOperation")
+	}
+
+	var r0 client.CallbackExecutionHandle
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string, error, client.CompleteNexusOperationOptions) (client.CallbackExecutionHandle, error)); ok {
+		return rf(ctx, callbackToken, failure, options)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string, error, client.CompleteNexusOperationOptions) client.CallbackExecutionHandle); ok {
+		r0 = rf(ctx, callbackToken, failure, options)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(client.CallbackExecutionHandle)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string, error, client.CompleteNexusOperationOptions) error); ok {
+		r1 = rf(ctx, callbackToken, failure, options)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+func (_m *Client) GetCallbackExecutionHandle(options client.GetCallbackExecutionHandleOptions) client.CallbackExecutionHandle {
+	ret := _m.Called(options)
+
+	if len(ret) == 0 {
+		panic("no return value specified for GetCallbackExecutionHandle")
+	}
+
+	var r0 client.CallbackExecutionHandle
+	if rf, ok := ret.Get(0).(func(client.GetCallbackExecutionHandleOptions) client.CallbackExecutionHandle); ok {
+		r0 = rf(options)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(client.CallbackExecutionHandle)
+		}
+	}
+
+	return r0
 }
 
 // WorkerDeploymentClient provides a mock function with given fields:

@@ -772,19 +772,23 @@ func (t *testSuiteClientForNexusOperations) CountActivities(ctx context.Context,
 	panic("unimplemented in the test environment")
 }
 
-func (t *testSuiteClientForNexusOperations) ExecuteCallback(ctx context.Context, options ClientStartCallbackOptions, completion any) (ClientCallbackHandle, error) {
+func (t *testSuiteClientForNexusOperations) CompleteNexusOperation(ctx context.Context, callbackToken string, result any, options ClientCompleteNexusOperationOptions) error {
 	panic("unimplemented in the test environment")
 }
 
-func (t *testSuiteClientForNexusOperations) GetCallbackHandle(options ClientGetCallbackHandleOptions) ClientCallbackHandle {
+func (t *testSuiteClientForNexusOperations) FailNexusOperation(ctx context.Context, callbackToken string, failure error, options ClientCompleteNexusOperationOptions) error {
 	panic("unimplemented in the test environment")
 }
 
-func (t *testSuiteClientForNexusOperations) ListCallbacks(ctx context.Context, options ClientListCallbacksOptions) (ClientListCallbacksResult, error) {
+func (t *testSuiteClientForNexusOperations) StartCompleteNexusOperation(ctx context.Context, callbackToken string, result any, options ClientCompleteNexusOperationOptions) (ClientCallbackExecutionHandle, error) {
 	panic("unimplemented in the test environment")
 }
 
-func (t *testSuiteClientForNexusOperations) CountCallbacks(ctx context.Context, options ClientCountCallbacksOptions) (*ClientCountCallbacksResult, error) {
+func (t *testSuiteClientForNexusOperations) StartFailNexusOperation(ctx context.Context, callbackToken string, failure error, options ClientCompleteNexusOperationOptions) (ClientCallbackExecutionHandle, error) {
+	panic("unimplemented in the test environment")
+}
+
+func (t *testSuiteClientForNexusOperations) GetCallbackExecutionHandle(options ClientGetCallbackExecutionHandleOptions) ClientCallbackExecutionHandle {
 	panic("unimplemented in the test environment")
 }
 

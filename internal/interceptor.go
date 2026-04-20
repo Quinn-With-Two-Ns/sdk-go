@@ -450,34 +450,29 @@ type ClientOutboundInterceptor interface {
 	// NOTE: Experimental
 	PollActivityResult(context.Context, *ClientPollActivityResultInput) (*ClientPollActivityResultOutput, error)
 
-	// ExecuteCallback intercepts client.Client.ExecuteCallback.
+	// ExecuteCallback intercepts client.Client.StartCompleteNexusOperation.
 	//
 	// NOTE: Experimental
-	ExecuteCallback(context.Context, *ClientExecuteCallbackInput) (ClientCallbackHandle, error)
+	ExecuteCallback(context.Context, *ClientExecuteCallbackInput) (ClientCallbackExecutionHandle, error)
 
-	// GetCallbackHandle intercepts client.Client.GetCallbackHandle.
+	// GetCallbackExecutionHandle intercepts client.Client.GetCallbackExecutionHandle.
 	// While the interceptor is allowed to make network calls here, note that the base implementation does not - it only constructs
 	// the handle which is then used to make network calls. There is no context object provided and errors cannot be returned.
 	//
 	// NOTE: Experimental
-	GetCallbackHandle(*ClientGetCallbackHandleInput) ClientCallbackHandle
+	GetCallbackExecutionHandle(*ClientGetCallbackExecutionHandleInput) ClientCallbackExecutionHandle
 
-	// CancelCallback intercepts client.CallbackHandle.Cancel.
-	//
-	// NOTE: Experimental
-	CancelCallback(context.Context, *ClientCancelCallbackInput) error
-
-	// TerminateCallback intercepts client.CallbackHandle.Terminate.
+	// TerminateCallback intercepts client.CallbackExecutionHandle.Terminate.
 	//
 	// NOTE: Experimental
 	TerminateCallback(context.Context, *ClientTerminateCallbackInput) error
 
-	// DescribeCallback intercepts client.CallbackHandle.Describe.
+	// DescribeCallback intercepts client.CallbackExecutionHandle.Describe.
 	//
 	// NOTE: Experimental
 	DescribeCallback(context.Context, *ClientDescribeCallbackInput) (*ClientDescribeCallbackOutput, error)
 
-	// PollCallbackResult intercepts client.CallbackHandle.Get.
+	// PollCallbackResult intercepts client.CallbackExecutionHandle.Get.
 	//
 	// NOTE: Experimental
 	PollCallbackResult(context.Context, *ClientPollCallbackResultInput) (*ClientPollCallbackResultOutput, error)
@@ -709,17 +704,23 @@ type ClientPollActivityResultOutput struct {
 //
 // Exposed as: [go.temporal.io/sdk/interceptor.ClientExecuteCallbackInput]
 type ClientExecuteCallbackInput struct {
-	Options    *ClientStartCallbackOptions
-	Completion any // the raw completion value (success value or error)
+	Options       *ClientCompleteNexusOperationOptions
+	CallbackToken string
+	// Result is the success value to deliver. Serialized via the data converter.
+	// Mutually exclusive with Failure.
+	Result any
+	// Failure is the error to deliver. Converted via the failure converter.
+	// Mutually exclusive with Result.
+	Failure error
 }
 
-// ClientGetCallbackHandleInput is the input to
-// ClientOutboundInterceptor.GetCallbackHandle.
+// ClientGetCallbackExecutionHandleInput is the input to
+// ClientOutboundInterceptor.GetCallbackExecutionHandle.
 //
 // NOTE: Experimental
 //
-// Exposed as: [go.temporal.io/sdk/interceptor.ClientGetCallbackHandleInput]
-type ClientGetCallbackHandleInput struct {
+// Exposed as: [go.temporal.io/sdk/interceptor.ClientGetCallbackExecutionHandleInput]
+type ClientGetCallbackExecutionHandleInput struct {
 	CallbackID string
 }
 

@@ -985,58 +985,20 @@ type (
 	// NOTE: Experimental
 	TerminateActivityOptions = internal.ClientTerminateActivityOptions
 
-	// CallbackTarget is an interface representing a callback target. Only the SDK
-	// can implement this interface.
+	// CompleteNexusOperationOptions contains configuration parameters for completing an async Nexus operation.
 	//
 	// NOTE: Experimental
-	CallbackTarget = internal.CallbackTarget
+	CompleteNexusOperationOptions = internal.ClientCompleteNexusOperationOptions
 
-	// TemporalCallback is a callback that uses the Temporal system endpoint
-	// to deliver results. It only requires the callback token.
+	// GetCallbackExecutionHandleOptions contains input for GetCallbackExecutionHandle call.
 	//
 	// NOTE: Experimental
-	TemporalCallback = internal.TemporalCallback
+	GetCallbackExecutionHandleOptions = internal.ClientGetCallbackExecutionHandleOptions
 
-	// StartCallbackOptions contains configuration parameters for starting a callback execution.
+	// CallbackExecutionHandle represents a running or completed standalone callback execution.
 	//
 	// NOTE: Experimental
-	StartCallbackOptions = internal.ClientStartCallbackOptions
-
-	// GetCallbackHandleOptions contains input for GetCallbackHandle call.
-	//
-	// NOTE: Experimental
-	GetCallbackHandleOptions = internal.ClientGetCallbackHandleOptions
-
-	// ListCallbacksOptions contains input for ListCallbacks call.
-	//
-	// NOTE: Experimental
-	ListCallbacksOptions = internal.ClientListCallbacksOptions
-
-	// ListCallbacksResult contains the result of the ListCallbacks call.
-	//
-	// NOTE: Experimental
-	ListCallbacksResult = internal.ClientListCallbacksResult
-
-	// CountCallbacksOptions contains input for CountCallbacks call.
-	//
-	// NOTE: Experimental
-	CountCallbacksOptions = internal.ClientCountCallbacksOptions
-
-	// CountCallbacksResult contains the result of the CountCallbacks call.
-	//
-	// NOTE: Experimental
-	CountCallbacksResult = internal.ClientCountCallbacksResult
-
-	// CountCallbacksAggregationGroup contains groups of callbacks if
-	// CountCallbackExecutions is grouped by a field.
-	//
-	// NOTE: Experimental
-	CountCallbacksAggregationGroup = internal.ClientCountCallbacksAggregationGroup
-
-	// CallbackHandle represents a running or completed standalone callback execution.
-	//
-	// NOTE: Experimental
-	CallbackHandle = internal.ClientCallbackHandle
+	CallbackExecutionHandle = internal.ClientCallbackExecutionHandle
 
 	// CallbackExecutionInfo contains information about a callback execution.
 	//
@@ -1577,33 +1539,34 @@ type (
 		// NOTE: Experimental
 		CountActivities(ctx context.Context, options CountActivitiesOptions) (*CountActivitiesResult, error)
 
-		// ExecuteCallback starts a standalone callback execution and returns a CallbackHandle.
-		// The callback delivers a Nexus completion to the specified callback URL.
-		//
-		// The completion parameter accepts either a success value (any type, serialized as a payload)
-		// or an error (converted to a failure). A nil completion is treated as success with an empty payload.
+		// CompleteNexusOperation completes an async Nexus operation with a success result.
+		// It starts the callback execution and waits for it to complete.
 		//
 		// NOTE: Experimental
-		ExecuteCallback(ctx context.Context, options StartCallbackOptions, completion any) (CallbackHandle, error)
+		CompleteNexusOperation(ctx context.Context, callbackToken string, result any, options CompleteNexusOperationOptions) error
 
-		// GetCallbackHandle creates a handle to the referenced callback.
+		// FailNexusOperation fails an async Nexus operation with an error.
+		// It starts the callback execution and waits for it to complete.
 		//
 		// NOTE: Experimental
-		GetCallbackHandle(options GetCallbackHandleOptions) CallbackHandle
+		FailNexusOperation(ctx context.Context, callbackToken string, failure error, options CompleteNexusOperationOptions) error
 
-		// ListCallbacks lists callback executions based on query.
-		//
-		// Currently, all errors are returned in the iterator and not the base level error.
+		// StartCompleteNexusOperation starts completing an async Nexus operation and returns
+		// a handle that can be used to wait for the completion, describe, or terminate it.
 		//
 		// NOTE: Experimental
-		ListCallbacks(ctx context.Context, options ListCallbacksOptions) (ListCallbacksResult, error)
+		StartCompleteNexusOperation(ctx context.Context, callbackToken string, result any, options CompleteNexusOperationOptions) (CallbackExecutionHandle, error)
 
-		// CountCallbacks counts callback executions based on query. The result
-		// includes the total count and optionally grouped counts if the query includes
-		// a GROUP BY clause.
+		// StartFailNexusOperation starts failing an async Nexus operation and returns
+		// a handle that can be used to wait for the completion, describe, or terminate it.
 		//
 		// NOTE: Experimental
-		CountCallbacks(ctx context.Context, options CountCallbacksOptions) (*CountCallbacksResult, error)
+		StartFailNexusOperation(ctx context.Context, callbackToken string, failure error, options CompleteNexusOperationOptions) (CallbackExecutionHandle, error)
+
+		// GetCallbackExecutionHandle creates a handle to the referenced callback execution.
+		//
+		// NOTE: Experimental
+		GetCallbackExecutionHandle(options GetCallbackExecutionHandleOptions) CallbackExecutionHandle
 
 		// WorkflowService provides access to the underlying gRPC service. This should only be used for advanced use cases
 		// that cannot be accomplished via other Client methods. Unlike calls to other Client methods, calls directly to the
@@ -1844,13 +1807,6 @@ func NewMTLSCredentials(certificate tls.Certificate) Credentials {
 	return internal.NewMTLSCredentials(certificate)
 }
 
-// NewTemporalCallback creates a [TemporalCallback] with the given token.
-// The token is the Temporal callback token from the Nexus operation.
-//
-// NOTE: Experimental
-func NewTemporalCallback(token string) TemporalCallback {
-	return internal.NewTemporalCallback(token)
-}
 
 // NewWorkflowUpdateServiceTimeoutOrCanceledError creates a new WorkflowUpdateServiceTimeoutOrCanceledError.
 func NewWorkflowUpdateServiceTimeoutOrCanceledError(err error) *WorkflowUpdateServiceTimeoutOrCanceledError {

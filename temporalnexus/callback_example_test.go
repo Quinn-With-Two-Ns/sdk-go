@@ -24,45 +24,15 @@ import (
 //
 // Flow:
 //  1. CallerWorkflow invokes a Nexus operation via workflow.NexusClient.
-//  2. The Nexus operation handler extracts the callback URL/token from
+//  2. The Nexus operation handler extracts the callback token from
 //     StartOperationOptions and attaches it to the context.
 //  3. The handler starts a standalone activity via client.ExecuteActivity().
 //  4. A ClientOutboundInterceptor intercepts ExecuteActivity, reads the
 //     callback info from context, and serializes it into the activity header.
 //  5. The activity executes on a worker.
-//  6. An ActivityInboundInterceptor reads the callback info from the activity
-//     header after execution, then calls client.ExecuteCallback() to deliver
+//  6. An ActivityInboundInterceptor reads the callback token from the activity
+//     header after execution, then calls client.CompleteNexusOperation() to deliver
 //     the result (or failure) back to the Nexus caller.
-//
-// Diagram:
-//
-//	┌────────────────┐         ┌──────────────────────────────────────┐
-//	│ CallerWorkflow │         │           Nexus Handler              │
-//	│                │         │                                      │
-//	│  NexusClient.  │────────▶│  1. Extract callback URL/token       │
-//	│  ExecuteOp()   │         │  2. Attach to context                │
-//	│                │         │  3. client.ExecuteActivity()          │
-//	└───────▲────────┘         └──────────────┬───────────────────────┘
-//	        │                                 │
-//	        │                  ┌──────────────▼───────────────────────┐
-//	        │                  │  ClientOutboundInterceptor           │
-//	        │                  │                                      │
-//	        │                  │  Reads callback info from context,   │
-//	        │                  │  serializes into activity header     │
-//	        │                  └──────────────┬───────────────────────┘
-//	        │                                 │
-//	        │                  ┌──────────────▼───────────────────────┐
-//	        │                  │  Worker: Activity Execution          │
-//	        │                  │                                      │
-//	        │                  │  ActivityInboundInterceptor:         │
-//	        │                  │  1. Runs the activity                │
-//	        │                  │  2. Reads callback info from header  │
-//	        │                  │  3. client.ExecuteCallback()         │
-//	        │                  │     delivers result to caller        │
-//	        │                  └──────────────┬───────────────────────┘
-//	        │                                 │
-//	        └─────── callback delivers ───────┘
-//	                 result to Nexus caller
 
 // --- Types ---
 
@@ -114,12 +84,7 @@ func CallerWorkflow(ctx workflow.Context, name string) (GreetOutput, error) {
 
 // --- Header key for propagating callback info ---
 
-const callbackHeaderKey = "_nexus-callback-info"
-
-// callbackHeaderValue is serialized into the activity header.
-type callbackHeaderValue struct {
-	CallbackToken string `json:"callback_token"`
-}
+const callbackHeaderKey = "_nexus-callback-token"
 
 // --- Context key for passing callback info from handler to client interceptor ---
 
@@ -129,7 +94,7 @@ type callbackCtxKey struct{}
 
 // greetOperation implements nexus.Operation[GreetInput, GreetOutput] as an async
 // operation backed by a standalone activity. The activity interceptor delivers
-// the result via a standalone callback when the activity completes.
+// the result via CompleteNexusOperation when the activity completes.
 type greetOperation struct {
 	nexus.UnimplementedOperation[GreetInput, GreetOutput]
 }
@@ -146,13 +111,8 @@ func (o *greetOperation) Start(ctx context.Context, input GreetInput, opts nexus
 
 	// Extract the callback token from the Nexus StartOperationOptions.
 	if token := opts.CallbackHeader.Get("Temporal-Callback-Token"); token != "" {
-		ctx = context.WithValue(ctx, callbackCtxKey{}, callbackHeaderValue{
-			CallbackToken: token,
-		})
+		ctx = context.WithValue(ctx, callbackCtxKey{}, token)
 	}
-
-	// Attach callback info to context so the client interceptor can
-	// propagate it into the activity's headers.
 
 	// Start a standalone activity. The activity interceptor will deliver
 	// the callback when it completes.
@@ -171,10 +131,10 @@ func (o *greetOperation) Start(ctx context.Context, input GreetInput, opts nexus
 	return &nexus.HandlerStartOperationResultAsync{OperationToken: handle.GetID()}, nil
 }
 
-// --- Client Interceptor: propagates callback info into activity headers ---
+// --- Client Interceptor: propagates callback token into activity headers ---
 
 // NexusCallbackClientInterceptor intercepts ExecuteActivity to propagate
-// callback info from the context into the activity's headers.
+// the callback token from the context into the activity's headers.
 type NexusCallbackClientInterceptor struct {
 	interceptor.ClientInterceptorBase
 }
@@ -195,9 +155,9 @@ func (o *nexusCallbackClientOutbound) ExecuteActivity(
 	ctx context.Context,
 	in *interceptor.ClientExecuteActivityInput,
 ) (client.ActivityHandle, error) {
-	// If callback info is in the context, serialize it into the header.
-	if info, ok := ctx.Value(callbackCtxKey{}).(callbackHeaderValue); ok {
-		payload, err := converter.GetDefaultDataConverter().ToPayload(info)
+	// If callback token is in the context, serialize it into the header.
+	if token, ok := ctx.Value(callbackCtxKey{}).(string); ok {
+		payload, err := converter.GetDefaultDataConverter().ToPayload(token)
 		if err == nil {
 			header := interceptor.Header(ctx)
 			if header != nil {
@@ -211,8 +171,8 @@ func (o *nexusCallbackClientOutbound) ExecuteActivity(
 // --- Activity Interceptor: reads headers and delivers callback ---
 
 // NexusCallbackWorkerInterceptor intercepts activity execution. After the
-// activity completes, if callback info is present in the headers, it delivers
-// the result to the Nexus caller via a standalone callback.
+// activity completes, if a callback token is present in the headers, it delivers
+// the result to the Nexus caller via CompleteNexusOperation.
 type NexusCallbackWorkerInterceptor struct {
 	interceptor.WorkerInterceptorBase
 }
@@ -243,9 +203,9 @@ func (a *nexusCallbackActivityInbound) ExecuteActivity(
 	// Run the actual activity.
 	result, err := a.Next.ExecuteActivity(ctx, in)
 
-	// Check if callback info was propagated via headers.
-	cb := a.extractCallbackFromHeaders(ctx)
-	if cb == nil {
+	// Check if callback token was propagated via headers.
+	token := a.extractCallbackTokenFromHeaders(ctx)
+	if token == "" {
 		return result, err
 	}
 
@@ -260,37 +220,32 @@ func (a *nexusCallbackActivityInbound) ExecuteActivity(
 		completion = result
 	}
 
-	// Deliver the result via a standalone callback.
-	actInfo := a.outbound.GetInfo(ctx)
-	_, cbErr := c.ExecuteCallback(ctx, client.StartCallbackOptions{
-		ID:                     actInfo.ActivityID + "-callback",
-		Callback:               client.NewTemporalCallback(cb.CallbackToken),
-		ScheduleToCloseTimeout: 1 * time.Minute,
-	}, completion)
+	// Deliver the result via CompleteNexusOperation.
+	cbErr := c.CompleteNexusOperation(ctx, token, completion, client.CompleteNexusOperationOptions{})
 	if cbErr != nil {
-		activity.GetLogger(ctx).Warn("Failed to execute callback", "error", cbErr)
+		activity.GetLogger(ctx).Warn("Failed to complete nexus operation", "error", cbErr)
 		return nil, err
 	}
 
 	return result, err
 }
 
-// extractCallbackFromHeaders reads the callback info from the activity's
+// extractCallbackTokenFromHeaders reads the callback token from the activity's
 // propagated headers, if present.
-func (a *nexusCallbackActivityInbound) extractCallbackFromHeaders(ctx context.Context) *callbackHeaderValue {
+func (a *nexusCallbackActivityInbound) extractCallbackTokenFromHeaders(ctx context.Context) string {
 	header := interceptor.Header(ctx)
 	if header == nil {
-		return nil
+		return ""
 	}
 	payload, ok := header[callbackHeaderKey]
 	if !ok || payload == nil {
-		return nil
+		return ""
 	}
-	var val callbackHeaderValue
-	if err := converter.GetDefaultDataConverter().FromPayload(payload, &val); err != nil {
-		return nil
+	var token string
+	if err := converter.GetDefaultDataConverter().FromPayload(payload, &token); err != nil {
+		return ""
 	}
-	return &val
+	return token
 }
 
 // --- Worker Setup ---
